@@ -37,11 +37,21 @@ jobs:
           printf '\nd975f751698a77b662f1254ddbeed3901e976f5a\n' > "$ANDROID_HOME/licenses/intel-android-extra-license"
           ls -la "$ANDROID_HOME/licenses"
 
-      - name: 查看已装 SDK 组件
+      - name: 用 sdkmanager 补装组件并接受许可
         run: |
+          set -e
           export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "platforms 目录不存在"
-          ls "$ANDROID_HOME/build-tools" 2>/dev/null || echo "build-tools 目录不存在"
+          SDKMAN=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          echo "sdkmanager: ${SDKMAN:-未找到}"
+          if [ -n "$SDKMAN" ]; then
+            yes 2>/dev/null | "$SDKMAN" --licenses > /dev/null 2>&1 || true
+            "$SDKMAN" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
+            "$SDKMAN" --install "build-tools;33.0.1" > /dev/null 2>&1 || true
+          fi
+          echo "--- 已装 build-tools ---"
+          ls "$ANDROID_HOME/build-tools" 2>/dev/null || echo "无"
+          echo "--- 已装 platforms ---"
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "无"
 
       - name: 安装 Gradle 8.2
         uses: gradle/actions/setup-gradle@v3

@@ -6,6 +6,7 @@ plugins {
 android {
     namespace 'com.example.navscreen'
     compileSdk 34
+    buildToolsVersion '34.0.0'   // 显式指定，避免 AGP 默认去下 33.0.1 触发许可问题
 
     defaultConfig {
         applicationId "com.example.navscreen"
