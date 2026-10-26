@@ -37,9 +37,10 @@ android {
         }
     }
 
+    /* 变体源码目录：用 java.srcDirs 兼容性最好（KGP 会编译其中的 .kt 文件） */
     sourceSets {
-        lite { kotlin.srcDirs += 'src/lite/kotlin' }
-        amap { kotlin.srcDirs += 'src/amap/kotlin' }
+        lite { java.srcDirs += 'src/lite/kotlin' }
+        amap { java.srcDirs += 'src/amap/kotlin' }
     }
 
     compileOptions {

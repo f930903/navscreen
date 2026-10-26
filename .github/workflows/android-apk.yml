@@ -21,16 +21,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: 安装 Android SDK（自动接受许可）
+        uses: android-actions/setup-android@v3
+
       - name: 安装 Gradle 8.2
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
-
-      - name: 接受 Android SDK 许可
-        run: |
-          if [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          fi
 
       - name: 编译 liteDebug
         working-directory: android
