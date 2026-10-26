@@ -165,31 +165,44 @@ class RestAmapProvider(
                 if (n.isNotBlank()) sugg += n
             }
         }
+        /* 按离你当前位置的距离排序，地址后面带「距你 X km」，对齐地图 App 的效果 */
+        val me = cachedGcj()
+        if (me != null && out.isNotEmpty()) {
+            val withD = out.map { p ->
+                val d = meters(me.first, me.second, p.lat, p.lon)
+                val dtxt = if (d < 1000) "%.0f m".format(d) else "%.1f km".format(d / 1000)
+                p.copy(snippet = "${p.snippet} · 距你 $dtxt") to d
+            }.sortedBy { it.second }
+            return withD.map { it.first } to sugg
+        }
         return out to sugg
+    }
+
+    /** 手机缓存的定位（GCJ-02），不需要先点开始推送；没有权限/缓存就 null */
+    private fun cachedGcj(): Pair<Double, Double>? = try {
+        val ok = ContextCompat.checkSelfPermission(
+            ctx, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!ok) null
+        else {
+            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            when {
+                loc != null -> Wgs2Gcj.toGcj02(loc.latitude, loc.longitude)
+                lastFix != null -> lastFix!!.lat to lastFix!!.lon
+                else -> null
+            }
+        }
+    } catch (e: Exception) {
+        null
     }
 
     /** 用手机缓存的定位反查所在城市（不需要先点开始推送） */
     private fun detectCity(): String {
-        try {
-            val ok = ContextCompat.checkSelfPermission(
-                ctx, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!ok) return ""
-            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                ?: lastFix?.let { return cityOf(it.lat, it.lon) }
-                ?: return ""
-            return cityOf(loc.latitude, loc.longitude)
-        } catch (e: Exception) {
-            return ""
-        }
-    }
-
-    private fun cityOf(wgsLat: Double, wgsLon: Double): String {
+        val g = cachedGcj() ?: return ""
         return try {
-            val (gLat, gLon) = Wgs2Gcj.toGcj02(wgsLat, wgsLon)
             val obj = JSONObject(
-                httpGet("https://restapi.amap.com/v3/geocode/regeo?key=$key&location=$gLon,$gLat&extensions=base")
+                httpGet("https://restapi.amap.com/v3/geocode/regeo?key=$key&location=${g.second},${g.first}&extensions=base")
             )
             val ac = obj.getJSONObject("regeocode").getJSONObject("addressComponent")
             val c = ac.opt("city")
@@ -198,6 +211,12 @@ class RestAmapProvider(
         } catch (e: Exception) {
             ""
         }
+    }
+
+    private fun meters(aLat: Double, aLon: Double, bLat: Double, bLon: Double): Double {
+        val x = (bLon - aLon) * 111320.0 * kotlin.math.cos(Math.toRadians((aLat + bLat) / 2))
+        val y = (bLat - aLat) * 110540.0
+        return kotlin.math.sqrt(x * x + y * y)
     }
 
     /* ---------------- 驾车算路：/v3/direction/driving ---------------- */
