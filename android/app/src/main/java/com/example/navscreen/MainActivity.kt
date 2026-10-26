@@ -93,7 +93,9 @@ class MainActivity : AppCompatActivity() {
                         android.R.id.text1,
                         list.map { "${it.title}  ·  ${it.snippet}" }
                     )
-                    statusText.text = if (list.isEmpty()) "没搜到，可改填「纬度,经度」" else "点一条作为目的地"
+                    statusText.text = if (list.isNotEmpty()) "点一条作为目的地"
+                        else if (statusText.text.toString() == "搜索中…") "没搜到，可改填「纬度,经度」"
+                        else statusText.text   // 保留 provider 的提示（城市建议/错误码）
                 }
             }
         }

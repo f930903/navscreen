@@ -97,38 +97,107 @@ class RestAmapProvider(
     override fun searchPoi(keyword: String, city: String, cb: (List<PoiHit>) -> Unit) {
         Thread {
             try {
-                val kw = URLEncoder.encode(keyword, "UTF-8")
-                var url = "https://restapi.amap.com/v3/place/text?key=$key&keywords=$kw" +
-                    "&offset=20&page=1&extensions=base"
-                if (city.isNotBlank()) url += "&city=" + URLEncoder.encode(city, "UTF-8")
-                val obj = JSONObject(httpGet(url))
-                if (obj.optString("status") != "1") {
-                    val info = obj.optString("info")
-                    val code = obj.optString("infocode")
-                    onLog?.invoke("高德返回错误：$info ($code)")
+                /* 第 1 步：优先用手机位置反查所在城市，在小范围内搜（准） */
+                var cityArg = city.trim()
+                if (cityArg.isEmpty()) cityArg = detectCity()
+                var list = queryPoi(keyword, cityArg).first
+
+                /* 第 2 步：本地没搜到 → 全国搜，拿高德的城市建议 */
+                if (list.isEmpty()) {
+                    val (l2, suggest) = queryPoi(keyword, "")
+                    if (l2.isNotEmpty()) {
+                        postCb(cb, l2)
+                        return@Thread
+                    }
+                    /* 第 3 步：按建议城市逐个重试（小超市这类 POI 必须带城市才搜得到） */
+                    val tried = mutableSetOf(cityArg)
+                    for (c in suggest.take(4)) {
+                        if (c in tried) continue
+                        tried += c
+                        val l3 = queryPoi(keyword, c).first
+                        if (l3.isNotEmpty()) {
+                            onLog?.invoke("在「${c}市」找到了，点一条作为目的地")
+                            postCb(cb, l3)
+                            return@Thread
+                        }
+                    }
+                    onLog?.invoke("没搜到「$keyword」。试试在搜索框加上城市名，如「黄石 $keyword」")
                     postCb(cb, emptyList())
                     return@Thread
                 }
-                val arr = obj.optJSONArray("pois")
-                val out = ArrayList<PoiHit>()
-                if (arr != null) {
-                    for (i in 0 until arr.length()) {
-                        val p = arr.getJSONObject(i)
-                        val loc = p.optString("location")
-                        val parts = loc.split(",")
-                        if (parts.size != 2) continue
-                        val lon = parts[0].toDoubleOrNull() ?: continue
-                        val lat = parts[1].toDoubleOrNull() ?: continue
-                        val addr = p.optString("address").ifBlank { p.optString("cityname") }
-                        out.add(PoiHit(p.optString("name"), addr, lat, lon))
-                    }
-                }
-                postCb(cb, out)
+                postCb(cb, list)
             } catch (e: Exception) {
                 onLog?.invoke("搜索失败：${e.message}")
                 postCb(cb, emptyList())
             }
         }.start()
+    }
+
+    /** 调一次 place/text；返回 结果列表 + 高德建议的城市列表 */
+    private fun queryPoi(keyword: String, city: String): Pair<List<PoiHit>, List<String>> {
+        val kw = URLEncoder.encode(keyword, "UTF-8")
+        var url = "https://restapi.amap.com/v3/place/text?key=$key&keywords=$kw" +
+            "&offset=20&page=1&extensions=base"
+        if (city.isNotBlank()) url += "&city=" + URLEncoder.encode(city, "UTF-8")
+        val obj = JSONObject(httpGet(url))
+        if (obj.optString("status") != "1") {
+            onLog?.invoke("高德返回错误：${obj.optString("info")} (${obj.optString("infocode")})")
+            return emptyList<PoiHit>() to emptyList()
+        }
+        val arr = obj.optJSONArray("pois")
+        val out = ArrayList<PoiHit>()
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val p = arr.getJSONObject(i)
+                val parts = p.optString("location").split(",")
+                if (parts.size != 2) continue
+                val lon = parts[0].toDoubleOrNull() ?: continue
+                val lat = parts[1].toDoubleOrNull() ?: continue
+                val addr = p.optString("address").ifBlank { p.optString("cityname") }
+                out.add(PoiHit(p.optString("name"), addr, lat, lon))
+            }
+        }
+        /* 建议城市：suggestion.cities[].name */
+        val sugg = ArrayList<String>()
+        obj.optJSONObject("suggestion")?.optJSONArray("cities")?.let { cs ->
+            for (i in 0 until cs.length()) {
+                val n = cs.getJSONObject(i).optString("name").removeSuffix("市")
+                if (n.isNotBlank()) sugg += n
+            }
+        }
+        return out to sugg
+    }
+
+    /** 用手机缓存的定位反查所在城市（不需要先点开始推送） */
+    private fun detectCity(): String {
+        try {
+            val ok = ContextCompat.checkSelfPermission(
+                ctx, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!ok) return ""
+            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                ?: lastFix?.let { return cityOf(it.lat, it.lon) }
+                ?: return ""
+            return cityOf(loc.latitude, loc.longitude)
+        } catch (e: Exception) {
+            return ""
+        }
+    }
+
+    private fun cityOf(wgsLat: Double, wgsLon: Double): String {
+        return try {
+            val (gLat, gLon) = Wgs2Gcj.toGcj02(wgsLat, wgsLon)
+            val obj = JSONObject(
+                httpGet("https://restapi.amap.com/v3/geocode/regeo?key=$key&location=$gLon,$gLat&extensions=base")
+            )
+            val ac = obj.getJSONObject("regeocode").getJSONObject("addressComponent")
+            val c = ac.opt("city")
+            val name = if (c is String && c.isNotBlank()) c else ac.optString("province")
+            name.removeSuffix("市")
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     /* ---------------- 驾车算路：/v3/direction/driving ---------------- */
