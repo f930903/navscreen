@@ -25,8 +25,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安装 Android SDK（自动接受许可）
-        uses: android-actions/setup-android@v3
+      # 直接写入许可文件，比 sdkmanager --licenses 和第三方 action 都稳
+      - name: 接受 Android SDK 许可
+        run: |
+          set -e
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          mkdir -p "$ANDROID_HOME/licenses"
+          printf '\n24333f8a63b7025c\n'                    > "$ANDROID_HOME/licenses/android-sdk-license"
+          printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n' > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          printf '\nd975f751698a77b662f1254ddbeed3901e976f5a\n' > "$ANDROID_HOME/licenses/intel-android-extra-license"
+          ls -la "$ANDROID_HOME/licenses"
+
+      - name: 查看已装 SDK 组件
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "platforms 目录不存在"
+          ls "$ANDROID_HOME/build-tools" 2>/dev/null || echo "build-tools 目录不存在"
 
       - name: 安装 Gradle 8.2
         uses: gradle/actions/setup-gradle@v3
