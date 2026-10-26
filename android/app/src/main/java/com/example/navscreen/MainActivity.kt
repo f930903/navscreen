@@ -15,6 +15,8 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -38,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var catsBox: LinearLayout
     private lateinit var historyRow: View
     private lateinit var historyBox: LinearLayout
+    private lateinit var mapView: WebView
 
     private var provider: NavProvider? = null
     private var receiverRegistered = false
@@ -56,8 +59,37 @@ class MainActivity : AppCompatActivity() {
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
-            i?.getStringExtra(NavService.EXTRA_TEXT)?.let { statusText.text = it }
+            if (i == null) return
+            when (i.action) {
+                NavService.ACTION_STATUS ->
+                    i.getStringExtra(NavService.EXTRA_TEXT)?.let { statusText.text = it }
+                NavService.ACTION_FIX -> {
+                    val lat = i.getDoubleExtra(NavService.EXTRA_LAT, Double.NaN)
+                    val lon = i.getDoubleExtra(NavService.EXTRA_LON, Double.NaN)
+                    if (!lat.isNaN() && !lon.isNaN()) {
+                        val brg = i.getDoubleExtra(NavService.EXTRA_BEARING, 0.0)
+                        val spd = i.getIntExtra(NavService.EXTRA_SPEED, 0)
+                        js("onMyLocation($lat,$lon,$brg,$spd)")
+                    }
+                }
+                NavService.ACTION_ROUTE -> {
+                    val pts = i.getStringExtra(NavService.EXTRA_POINTS) ?: "[]"
+                    js("onRoute('${pts}')")
+                }
+            }
         }
+    }
+
+    /** 调地图页面里的 JS 函数 */
+    private fun js(code: String) {
+        if (::mapView.isInitialized) mapView.evaluateJavascript(code, null)
+    }
+
+    /* 主界面自己的定位（服务没开也能在地图上看到自己） */
+    private val myLocListener = android.location.LocationListener { loc ->
+        val (gLat, gLon) = Wgs2Gcj.toGcj02(loc.latitude, loc.longitude)
+        val brg = if (loc.hasBearing()) loc.bearing else 0f
+        js("onMyLocation($gLat,$gLon,$brg,0)")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         initProvider()
+        setupMap()
         buildCategoryChips()
         renderHistory()
 
@@ -134,6 +167,7 @@ class MainActivity : AppCompatActivity() {
                     selLat = t.lat; selLon = t.lon; selName = t.name
                     saveHistory(t.name)
                     statusText.text = "已选目的地：${t.name}（${t.district}${t.address}）"
+                    js("onDestination($selLat,$selLon,'${t.name.replace("'", "")}')")
                 } else {
                     doSearch(t.name)   // 联想词没坐标 → 转正式搜索
                 }
@@ -143,6 +177,7 @@ class MainActivity : AppCompatActivity() {
                 selLon = p.lon
                 selName = p.title
                 statusText.text = "已选目的地：${p.title}（${p.snippet}）"
+                js("onDestination(${p.lat},${p.lon},'${p.title.replace("'", "")}')")
             }
         }
 
@@ -168,6 +203,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btn_stop).setOnClickListener {
             stopService(Intent(this, NavService::class.java))
+            js("onClearRoute()")
             statusText.text = "已停止"
         }
     }
@@ -231,6 +267,54 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
             }
         }.start()
+    }
+
+    /* ---------------- 地图 ---------------- */
+
+    @android.annotation.SuppressLint("SetJavaScriptEnabled")
+    private fun setupMap() {
+        mapView = findViewById(R.id.wv_map)
+        mapView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+        }
+        mapView.webViewClient = WebViewClient()
+        mapView.loadUrl("file:///android_asset/map/index.html")
+    }
+
+    /** 前台时自己听定位，让地图上的蓝点动起来（不开服务也能看到自己在哪） */
+    private fun startMyLocationUpdates() {
+        val ok = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!ok) return
+        try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            for (p in listOf(
+                android.location.LocationManager.GPS_PROVIDER,
+                android.location.LocationManager.NETWORK_PROVIDER
+            )) {
+                if (lm.isProviderEnabled(p)) lm.requestLocationUpdates(p, 1500L, 2f, myLocListener)
+            }
+            /* 先用缓存位置把地图中心挪过去 */
+            val last = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+            last?.let {
+                val (gLat, gLon) = Wgs2Gcj.toGcj02(it.latitude, it.longitude)
+                js("onMyLocation($gLat,$gLon,0,0)")
+            }
+        } catch (e: Exception) {
+            CrashLog.save(this, "主界面定位", e)
+        }
+    }
+
+    private fun stopMyLocationUpdates() {
+        try {
+            (getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager)
+                .removeUpdates(myLocListener)
+        } catch (_: Exception) {
+        }
     }
 
     /* ---------------- 分类入口 + 历史记录 ---------------- */
@@ -303,8 +387,13 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         // Android 13（API 33）起必须显式声明导出标志，否则直接抛 SecurityException 闪退
         try {
+            val filter = IntentFilter().apply {
+                addAction(NavService.ACTION_STATUS)
+                addAction(NavService.ACTION_FIX)
+                addAction(NavService.ACTION_ROUTE)
+            }
             ContextCompat.registerReceiver(
-                this, statusReceiver, IntentFilter(NavService.ACTION_STATUS),
+                this, statusReceiver, filter,
                 ContextCompat.RECEIVER_NOT_EXPORTED
             )
             receiverRegistered = true
@@ -312,6 +401,7 @@ class MainActivity : AppCompatActivity() {
             receiverRegistered = false
             CrashLog.save(this, "注册状态广播接收器", e)
         }
+        startMyLocationUpdates()
     }
 
     /** 上次崩溃的堆栈直接显示在界面上，方便复制出来排查 */
@@ -341,7 +431,13 @@ class MainActivity : AppCompatActivity() {
             try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
             receiverRegistered = false
         }
+        stopMyLocationUpdates()
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        if (::mapView.isInitialized) mapView.destroy()
+        super.onDestroy()
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()

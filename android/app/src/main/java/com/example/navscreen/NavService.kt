@@ -27,6 +27,13 @@ class NavService : Service() {
         const val EXTRA_DEST_NAME  = "dest_name"
         const val ACTION_STATUS    = "com.example.navscreen.STATUS"
         const val EXTRA_TEXT       = "text"
+        const val ACTION_FIX       = "com.example.navscreen.FIX"     // 定位帧（给主界面地图）
+        const val EXTRA_LAT        = "lat"
+        const val EXTRA_LON        = "lon"
+        const val EXTRA_BEARING    = "bearing"
+        const val EXTRA_SPEED      = "speed"
+        const val ACTION_ROUTE     = "com.example.navscreen.ROUTE"   // 路线点 JSON（给主界面地图）
+        const val EXTRA_POINTS     = "points"
 
         private const val TAG      = "NavService"
         private const val CH_ID    = "nav_push"
@@ -100,6 +107,14 @@ class NavService : Service() {
     /* ---------------- 定位回调 → 组帧推送 ---------------- */
     private fun onFix(fix: NavFix) {
         lastFix = fix
+        /* 同步一份给主界面地图（同进程广播，开销可忽略） */
+        sendBroadcast(Intent(ACTION_FIX).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_LAT, fix.lat)
+            putExtra(EXTRA_LON, fix.lon)
+            putExtra(EXTRA_BEARING, fix.bearing.toDouble())
+            putExtra(EXTRA_SPEED, fix.speedKmh)
+        })
         scope.launch {
             if (!ble.isReady) return@launch
 
@@ -144,10 +159,30 @@ class NavService : Service() {
 
     private fun onRoute(plan: RoutePlan?) {
         routing = false
-        if (plan == null) { notifyText("算路失败，稍后重试"); return }
+        if (plan == null) {
+            notifyText("算路失败，稍后重试")
+            sendBroadcast(Intent(ACTION_ROUTE).apply {
+                setPackage(packageName)
+                putExtra(EXTRA_POINTS, "[]")
+            })
+            return
+        }
 
         tracker.setPlan(plan)
         log("算路成功：${plan.steps.size} 步 · %.1f km".format(plan.totalMeters / 1000.0))
+
+        /* 路线点发给主界面地图画蓝线（GCJ-02） */
+        val pts = tracker.routePoints()
+        val sb = StringBuilder("[")
+        pts.forEachIndexed { i, p ->
+            if (i > 0) sb.append(',')
+            sb.append('[').append(p.first).append(',').append(p.second).append(']')
+        }
+        sb.append(']')
+        sendBroadcast(Intent(ACTION_ROUTE).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_POINTS, sb.toString())
+        })
 
         scope.launch {
             ble.write(NavProtocol.text(0, destName))          // 目的地

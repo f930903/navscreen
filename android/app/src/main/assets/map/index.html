@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<link rel="stylesheet" href="leaflet.css"/>
+<style>
+  html, body, #map { height: 100%; margin: 0; padding: 0; background: #f2f2f2; }
+  /* 我的位置：蓝点（外圈白边），中心有个小箭头按航向旋转 */
+  .me-dot {
+    width: 18px; height: 18px; background: #1a73ff;
+    border: 3px solid #fff; border-radius: 50%;
+    box-shadow: 0 0 6px rgba(0,0,0,.45);
+  }
+  .me-arrow {
+    width: 0; height: 0; margin: 1px auto 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 10px solid #fff;
+  }
+  /* 目的地：橙色图钉 */
+  .dest-pin {
+    width: 22px; height: 22px; background: #FF7A1A;
+    border: 2px solid #fff; border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 0 6px rgba(0,0,0,.45);
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script src="leaflet.js"></script>
+<script>
+  /* 坐标系说明：App 推过来的坐标是 GCJ-02（已纠偏），
+     高德栅格瓦片也是 GCJ-02，两者天然对齐，不会再偏 300~500 米。 */
+  var map = L.map('map', { zoomControl: false, attributionControl: true })
+             .setView([30.59, 114.31], 11);
+
+  L.tileLayer(
+    'https://webrst0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
+    { subdomains: ['1','2','3','4'], maxZoom: 18, minZoom: 3, attribution: '© 高德地图' }
+  ).addTo(map);
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  var meMarker = null, destMarker = null, routeLine = null, firstFix = true;
+
+  function meIcon(bearing) {
+    var html = '<div class="me-dot"><div class="me-arrow" style="transform:rotate(' +
+               (bearing || 0) + 'deg);transform-origin:50% 100%"></div></div>';
+    return L.divIcon({ className: '', html: html, iconSize: [18, 18], iconAnchor: [9, 9] });
+  }
+
+  /* 我的位置（GCJ-02） */
+  function onMyLocation(lat, lng, bearing, speed) {
+    var p = [lat, lng];
+    if (!meMarker) {
+      meMarker = L.marker(p, { icon: meIcon(bearing) }).addTo(map);
+    } else {
+      meMarker.setLatLng(p);
+      meMarker.setIcon(meIcon(bearing));
+    }
+    if (firstFix) { map.setView(p, 16); firstFix = false; }
+  }
+
+  /* 目的地图钉；有我的位置就把两点都框进视野 */
+  function onDestination(lat, lng, name) {
+    var p = [lat, lng];
+    if (destMarker) map.removeLayer(destMarker);
+    destMarker = L.marker(p, {
+      icon: L.divIcon({ className: '', html: '<div class="dest-pin"></div>', iconSize: [22, 22], iconAnchor: [11, 21] })
+    }).addTo(map);
+    if (name) destMarker.bindTooltip(name, { direction: 'top', offset: [0, -20] });
+    if (meMarker) map.fitBounds([meMarker.getLatLng(), p], { padding: [40, 40] });
+    else map.setView(p, 15);
+  }
+
+  /* 路线蓝线：json 是 [[lat,lng],...] */
+  function onRoute(json) {
+    try {
+      var pts = JSON.parse(json);
+      if (routeLine) map.removeLayer(routeLine);
+      routeLine = null;
+      if (pts && pts.length >= 2) {
+        routeLine = L.polyline(pts, { color: '#1a73ff', weight: 6, opacity: 0.85 }).addTo(map);
+        map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+      }
+    } catch (e) {}
+  }
+
+  function onClearRoute() {
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+  }
+</script>
+</body>
+</html>
