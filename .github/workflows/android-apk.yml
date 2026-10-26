@@ -9,7 +9,7 @@ on:
       - '.github/workflows/android-apk.yml'
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -95,3 +95,20 @@ jobs:
           name: navscreen-lite-apk
           path: android/app/build/outputs/apk/lite/debug/*.apk
           if-no-files-found: error
+
+      # 免登录也能直接下载：把 APK 推到 apk 分支，走 raw.githubusercontent.com 取
+      - name: 发布 APK 到 apk 分支
+        if: success()
+        run: |
+          set -e
+          APK=$(ls android/app/build/outputs/apk/lite/debug/*.apk | head -1)
+          echo "APK: $APK"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B apk
+          mkdir -p download
+          cp "$APK" download/navscreen-lite-debug.apk
+          git add -f download/navscreen-lite-debug.apk
+          git commit -m "apk: 自动发布 lite APK · run ${GITHUB_RUN_NUMBER} [skip ci]" || exit 0
+          git push -f origin apk
+          echo "已发布：https://raw.githubusercontent.com/f930903/navscreen/apk/download/navscreen-lite-debug.apk"
