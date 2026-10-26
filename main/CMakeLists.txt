@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "ui_screens.c"
+        "drivers.c"
+        "map.c"
+        "ble_nav.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_lcd
+        esp_lvgl_port
+        lvgl
+        esp_driver_gpio
+        esp_driver_uart
+        esp_driver_spi
+        esp_driver_ledc
+        esp_timer
+        fatfs
+        esp_vfs_fat
+        nvs_flash
+        bt            # BLE 导航通道（GATT Server）
+)

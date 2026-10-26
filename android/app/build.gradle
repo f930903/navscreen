@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+    id 'kotlin-android'
+}
+
+android {
+    namespace 'com.example.navscreen'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.navscreen"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    /* 两个变体：
+     *  lite —— 只用手机自带 GPS，零第三方依赖，随时可编译（推荐先跑这个验证 BLE）
+     *  amap —— 接高德 SDK，功能完整（定位 + 搜地点 + 算路），需要 aar 和 Key
+     *  在 Android Studio 左下角 Build Variants 里切换，或命令行：
+     *      gradlew assembleLiteDebug   /   gradlew assembleAmapDebug
+     */
+    flavorDimensions "map"
+    productFlavors {
+        lite {
+            dimension "map"
+            buildConfigField "boolean", "HAS_AMAP", "false"
+        }
+        amap {
+            dimension "map"
+            buildConfigField "boolean", "HAS_AMAP", "true"
+        }
+    }
+
+    sourceSets {
+        lite { kotlin.srcDirs += 'src/lite/kotlin' }
+        amap { kotlin.srcDirs += 'src/amap/kotlin' }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // 高德 SDK（只有 amap 变体需要）：把官网下载的 aar 拷进 app/libs/
+    // 需要：定位 AMap_Location_*.aar、搜索 AMap_Search_*.aar
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+}

@@ -1,0 +1,25 @@
+# 构建产物
+build/
+app/build/
+.gradle/
+local.properties
+
+# Android Studio
+.idea/
+*.iml
+.cxx/
+.cxx/
+
+# ESP-IDF
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# 高德 SDK（版权文件，不要公开上传）
+android/app/libs/*.aar
+android/app/libs/*.jar
+
+# 系统
+.DS_Store
+Thumbs.db

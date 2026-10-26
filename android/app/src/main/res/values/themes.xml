@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NavScreen" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">#FF7A1A</item>
+        <item name="colorPrimaryDark">#E06A10</item>
+        <item name="colorAccent">#FF7A1A</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
