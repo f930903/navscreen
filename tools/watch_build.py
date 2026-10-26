@@ -20,18 +20,20 @@ for i in range(30):
         time.sleep(30)
         continue
 
-    for run in data.get("workflow_runs", []):
-        if run["name"] != "Android APK":
-            continue
-        status, concl = run["status"], run["conclusion"]
-        print(f"[{i*30}s] Android APK: status={status} conclusion={concl}")
-        if status == "completed":
-            print("=== 结束 ===")
-            print("结论:", concl)
-            print("日志:", run["html_url"])
-            if concl == "success":
-                print("APK 下载:", run["html_url"] + "#artifacts")
-            raise SystemExit(0)
+    runs = [r for r in data.get("workflow_runs", []) if r["name"] == "Android APK"]
+    if not runs:
+        time.sleep(30)
+        continue
+    run = runs[0]  # 列表按时间倒序，第一条就是最新一次运行
+    status, concl = run["status"], run["conclusion"]
+    print(f"[{i*30}s] Android APK(#{run['run_number']}): status={status} conclusion={concl}")
+    if status == "completed":
+        print("=== 结束 ===")
+        print("结论:", concl)
+        print("日志:", run["html_url"])
+        if concl == "success":
+            print("APK 下载:", run["html_url"] + "#artifacts")
+        raise SystemExit(0)
     time.sleep(30)
 
 print("超时：15 分钟内未完成")
