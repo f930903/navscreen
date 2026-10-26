@@ -1,9 +1,14 @@
 name: Build NavScreen Firmware
 
+# ⚠️ 暂时只手动触发：屏的时序和 GPIO 还没按实机调好，
+#    现在自动跑必然失败，会掩盖真正要看的 Android APK 编译结果。
+#    等 config.h 按买到的屏改完，再把下面两行打开。
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
+# on:
+#   push:
+#     branches: [ main, master ]
+#   workflow_dispatch:
 
 jobs:
   build:
