@@ -53,18 +53,20 @@ class MainActivity : AppCompatActivity() {
         showCrashIfAny()
         requestPermissions()
 
-        provider = try {
-            NavProviderFactory.create(this).apply {
-                onLog = { s -> runOnUiThread { statusText.text = s } }
+        /* 高德 Web 服务 Key：填了就能按名字搜地点/算路，填完自动生效 */
+        val keyEdit = findViewById<EditText>(R.id.et_key)
+        val prefs = getSharedPreferences("navscreen", MODE_PRIVATE)
+        keyEdit.setText(prefs.getString("amap_web_key", ""))
+        keyEdit.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                prefs.edit().putString("amap_web_key", s?.toString()?.trim().orEmpty()).apply()
+                initProvider()
             }
-        } catch (e: Throwable) {
-            CrashLog.save(this, "MainActivity 创建地图实现", e)
-            null
-        }
-        val bleOk = packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
-        statusText.text = "地图实现：${provider?.name}\n" +
-            "系统 API ${Build.VERSION.SDK_INT} · BLE ${if (bleOk) "支持" else "不支持"}\n" +
-            "先点「开始推送」验证连接，再选目的地"
+        })
+
+        initProvider()
 
         findViewById<Button>(R.id.btn_search).setOnClickListener {
             val kw = destEdit.text.toString().trim()
@@ -128,6 +130,21 @@ class MainActivity : AppCompatActivity() {
             stopService(Intent(this, NavService::class.java))
             statusText.text = "已停止"
         }
+    }
+
+    private fun initProvider() {
+        provider = try {
+            NavProviderFactory.create(this).apply {
+                onLog = { s -> runOnUiThread { statusText.text = s } }
+            }
+        } catch (e: Throwable) {
+            CrashLog.save(this, "MainActivity 创建地图实现", e)
+            null
+        }
+        val bleOk = packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
+        statusText.text = "地图实现：${provider?.name}\n" +
+            "系统 API ${Build.VERSION.SDK_INT} · BLE ${if (bleOk) "支持" else "不支持"}\n" +
+            "先点「开始推送」验证连接，再选目的地"
     }
 
     override fun onResume() {

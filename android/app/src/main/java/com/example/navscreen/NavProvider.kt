@@ -81,6 +81,13 @@ object NavProviderFactory {
     private const val TAG = "NavProvider"
 
     fun create(ctx: Context): NavProvider {
+        /* 用户在设置里填了高德 Web 服务 Key 就用 REST 版（能搜地点、能算路） */
+        val key = ctx.getSharedPreferences("navscreen", Context.MODE_PRIVATE)
+            .getString("amap_web_key", "")?.trim().orEmpty()
+        if (key.isNotEmpty()) {
+            Log.i(TAG, "使用高德 Web 服务，Key=${key.take(6)}…")
+            return RestAmapProvider(ctx.applicationContext, key)
+        }
         return try {
             @Suppress("UNCHECKED_CAST")
             val c = Class.forName("com.example.navscreen.NavProviderImpl")
