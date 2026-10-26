@@ -97,40 +97,91 @@ class RestAmapProvider(
     override fun searchPoi(keyword: String, city: String, cb: (List<PoiHit>) -> Unit) {
         Thread {
             try {
-                /* 第 1 步：优先用手机位置反查所在城市，在小范围内搜（准） */
-                var cityArg = city.trim()
-                if (cityArg.isEmpty()) cityArg = detectCity()
-                var list = queryPoi(keyword, cityArg).first
-
-                /* 第 2 步：本地没搜到 → 全国搜，拿高德的城市建议 */
-                if (list.isEmpty()) {
-                    val (l2, suggest) = queryPoi(keyword, "")
-                    if (l2.isNotEmpty()) {
-                        postCb(cb, l2)
+                /* 第 0 步：有定位就先搜「身边 50 公里」，按距离从近到远（对齐地图 App） */
+                val me = cachedGcj()
+                if (me != null) {
+                    val around = queryAround(keyword, me.second, me.first)
+                    if (around.isNotEmpty()) {
+                        postCb(cb, decorate(around))
                         return@Thread
                     }
-                    /* 第 3 步：按建议城市逐个重试（小超市这类 POI 必须带城市才搜得到） */
-                    val tried = mutableSetOf(cityArg)
-                    for (c in suggest.take(4)) {
-                        if (c in tried) continue
-                        tried += c
-                        val l3 = queryPoi(keyword, c).first
-                        if (l3.isNotEmpty()) {
-                            onLog?.invoke("在「${c}市」找到了，点一条作为目的地")
-                            postCb(cb, l3)
-                            return@Thread
-                        }
-                    }
-                    onLog?.invoke("没搜到「$keyword」。试试在搜索框加上城市名，如「黄石 $keyword」")
-                    postCb(cb, emptyList())
+                }
+
+                /* 第 1 步：所在城市内搜 */
+                var cityArg = city.trim()
+                if (cityArg.isEmpty()) cityArg = detectCity()
+                val l1 = queryPoi(keyword, cityArg).first
+                if (l1.isNotEmpty()) {
+                    postCb(cb, decorate(l1))
                     return@Thread
                 }
-                postCb(cb, list)
+
+                /* 第 2 步：全国搜，拿高德的城市建议 */
+                val (l2, suggest) = queryPoi(keyword, "")
+                if (l2.isNotEmpty()) {
+                    postCb(cb, decorate(l2))
+                    return@Thread
+                }
+
+                /* 第 3 步：按建议城市逐个重试（小超市这类 POI 必须带城市才搜得到） */
+                val tried = mutableSetOf(cityArg)
+                for (c in suggest.take(4)) {
+                    if (c in tried) continue
+                    tried += c
+                    val l3 = queryPoi(keyword, c).first
+                    if (l3.isNotEmpty()) {
+                        onLog?.invoke("在「${c}市」找到了，点一条作为目的地")
+                        postCb(cb, decorate(l3))
+                        return@Thread
+                    }
+                }
+                onLog?.invoke("没搜到「$keyword」。试试在搜索框加上城市名，如「黄石 $keyword」")
+                postCb(cb, emptyList())
             } catch (e: Exception) {
                 onLog?.invoke("搜索失败：${e.message}")
                 postCb(cb, emptyList())
             }
         }.start()
+    }
+
+    /** 周边搜索：/v3/place/around，以你为中心按距离排序 */
+    private fun queryAround(keyword: String, lon: Double, lat: Double): List<PoiHit> {
+        return try {
+            val kw = URLEncoder.encode(keyword, "UTF-8")
+            val url = "https://restapi.amap.com/v3/place/around?key=$key" +
+                "&location=$lon,$lat&keywords=$kw&radius=50000&sortrule=distance&offset=25&page=1"
+            val obj = JSONObject(httpGet(url))
+            if (obj.optString("status") != "1") return emptyList()
+            parsePois(obj)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun parsePois(obj: JSONObject): List<PoiHit> {
+        val arr = obj.optJSONArray("pois") ?: return emptyList()
+        val out = ArrayList<PoiHit>()
+        for (i in 0 until arr.length()) {
+            val p = arr.getJSONObject(i)
+            val parts = p.optString("location").split(",")
+            if (parts.size != 2) continue
+            val lon = parts[0].toDoubleOrNull() ?: continue
+            val lat = parts[1].toDoubleOrNull() ?: continue
+            val addr = p.optString("address").ifBlank { p.optString("cityname") }
+            out.add(PoiHit(p.optString("name"), addr, lat, lon))
+        }
+        return out
+    }
+
+    /** 按离你当前位置的距离排序，地址后面带「距你 X km」 */
+    private fun decorate(list: List<PoiHit>): List<PoiHit> {
+        val me = cachedGcj() ?: return list
+        if (list.isEmpty()) return list
+        return list.map { p ->
+            val d = meters(me.first, me.second, p.lat, p.lon)
+            val dtxt = if (d < 1000) "%.0f m".format(d) else "%.1f km".format(d / 1000)
+            p.copy(snippet = "${p.snippet} · 距你 $dtxt") to d
+        }.sortedBy { it.second }.map { it.first }
     }
 
     /** 调一次 place/text；返回 结果列表 + 高德建议的城市列表 */
@@ -144,19 +195,7 @@ class RestAmapProvider(
             onLog?.invoke("高德返回错误：${obj.optString("info")} (${obj.optString("infocode")})")
             return emptyList<PoiHit>() to emptyList()
         }
-        val arr = obj.optJSONArray("pois")
-        val out = ArrayList<PoiHit>()
-        if (arr != null) {
-            for (i in 0 until arr.length()) {
-                val p = arr.getJSONObject(i)
-                val parts = p.optString("location").split(",")
-                if (parts.size != 2) continue
-                val lon = parts[0].toDoubleOrNull() ?: continue
-                val lat = parts[1].toDoubleOrNull() ?: continue
-                val addr = p.optString("address").ifBlank { p.optString("cityname") }
-                out.add(PoiHit(p.optString("name"), addr, lat, lon))
-            }
-        }
+        val out = parsePois(obj)
         /* 建议城市：suggestion.cities[].name */
         val sugg = ArrayList<String>()
         obj.optJSONObject("suggestion")?.optJSONArray("cities")?.let { cs ->
@@ -164,16 +203,6 @@ class RestAmapProvider(
                 val n = cs.getJSONObject(i).optString("name").removeSuffix("市")
                 if (n.isNotBlank()) sugg += n
             }
-        }
-        /* 按离你当前位置的距离排序，地址后面带「距你 X km」，对齐地图 App 的效果 */
-        val me = cachedGcj()
-        if (me != null && out.isNotEmpty()) {
-            val withD = out.map { p ->
-                val d = meters(me.first, me.second, p.lat, p.lon)
-                val dtxt = if (d < 1000) "%.0f m".format(d) else "%.1f km".format(d / 1000)
-                p.copy(snippet = "${p.snippet} · 距你 $dtxt") to d
-            }.sortedBy { it.second }
-            return withD.map { it.first } to sugg
         }
         return out to sugg
     }
@@ -207,7 +236,13 @@ class RestAmapProvider(
             val ac = obj.getJSONObject("regeocode").getJSONObject("addressComponent")
             val c = ac.opt("city")
             val name = if (c is String && c.isNotBlank()) c else ac.optString("province")
-            name.removeSuffix("市")
+            val city = name.removeSuffix("市")
+            /* 缓存下来，输入联想也能用（不用每次打字都反查） */
+            if (city.isNotBlank()) {
+                ctx.getSharedPreferences("navscreen", Context.MODE_PRIVATE)
+                    .edit().putString("city_cache", city).apply()
+            }
+            city
         } catch (e: Exception) {
             ""
         }

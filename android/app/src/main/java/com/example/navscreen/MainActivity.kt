@@ -249,9 +249,10 @@ class MainActivity : AppCompatActivity() {
     private fun fetchTips(kw: String) {
         val key = prefs.getString("amap_web_key", "")?.trim().orEmpty()
         if (key.isEmpty()) return
+        val city = prefs.getString("city_cache", "")?.trim().orEmpty()   // 带上城市，联想优先本地
         Thread {
             try {
-                val list = AmapWeb.inputTips(key, kw, "")
+                val list = AmapWeb.inputTips(key, kw, city)
                 runOnUiThread {
                     if (destEdit.text.toString().trim() != kw) return@runOnUiThread  // 结果过期
                     if (list.isEmpty()) return@runOnUiThread
@@ -279,8 +280,30 @@ class MainActivity : AppCompatActivity() {
             domStorageEnabled = true
             cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
         }
-        mapView.webViewClient = WebViewClient()
+        mapView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                /* 页面加载完立刻把缓存位置推过去，第一眼就是你在的地方 */
+                pushCachedLocation()
+            }
+        }
         mapView.loadUrl("file:///android_asset/map/index.html")
+    }
+
+    /** 用系统缓存位置把地图中心挪到你身边（可能有几分钟旧，但够快） */
+    private fun pushCachedLocation() {
+        try {
+            val ok = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!ok) return
+            val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val last = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                ?: return
+            val (gLat, gLon) = Wgs2Gcj.toGcj02(last.latitude, last.longitude)
+            js("onMyLocation($gLat,$gLon,0,0)")
+        } catch (_: Exception) {
+        }
     }
 
     /** 前台时自己听定位，让地图上的蓝点动起来（不开服务也能看到自己在哪） */
@@ -297,13 +320,7 @@ class MainActivity : AppCompatActivity() {
             )) {
                 if (lm.isProviderEnabled(p)) lm.requestLocationUpdates(p, 1500L, 2f, myLocListener)
             }
-            /* 先用缓存位置把地图中心挪过去 */
-            val last = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
-                ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
-            last?.let {
-                val (gLat, gLon) = Wgs2Gcj.toGcj02(it.latitude, it.longitude)
-                js("onMyLocation($gLat,$gLon,0,0)")
-            }
+            pushCachedLocation()
         } catch (e: Exception) {
             CrashLog.save(this, "主界面定位", e)
         }
@@ -438,6 +455,14 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (::mapView.isInitialized) mapView.destroy()
         super.onDestroy()
+    }
+
+    /** 权限刚批下来就立刻开始定位，让地图第一时间跳到你的位置 */
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) startMyLocationUpdates()
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
