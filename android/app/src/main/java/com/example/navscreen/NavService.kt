@@ -51,7 +51,13 @@ class NavService : Service() {
         destLat  = intent?.getDoubleExtra(EXTRA_DEST_LAT, Double.NaN) ?: Double.NaN
         destLon  = intent?.getDoubleExtra(EXTRA_DEST_LON, Double.NaN) ?: Double.NaN
 
-        startForeground(NOTIF_ID, buildNotification("正在连接圆屏…"))
+        /* Android 14 对前台服务类型和权限卡得很死，失败也不能让整个 App 崩掉 */
+        try {
+            startForeground(NOTIF_ID, buildNotification("正在连接圆屏…"))
+        } catch (e: Exception) {
+            CrashLog.save(this, "NavService.startForeground", e)
+            Log.e(TAG, "startForeground 失败，以后台方式继续：${e.message}")
+        }
 
         provider = NavProviderFactory.create(applicationContext)
         provider.onLog   = { log(it) }
@@ -66,8 +72,12 @@ class NavService : Service() {
                 if (ble.isReady) {
                     delay(2000)
                 } else {
-                    if (ble.connect()) log("圆屏已连接")
-                    else delay(3000)
+                    try {
+                        if (ble.connect()) log("圆屏已连接") else delay(3000)
+                    } catch (e: Exception) {
+                        CrashLog.save(this@NavService, "BLE 连接循环", e)
+                        delay(3000)
+                    }
                 }
             }
         }
@@ -176,9 +186,13 @@ class NavService : Service() {
     }
 
     private fun notifyText(s: String) {
-        /* 通知栏 */
-        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-            .notify(NOTIF_ID, buildNotification(s))
+        /* 通知栏（没给通知权限时部分机型会抛异常，吞掉不影响主流程） */
+        try {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIF_ID, buildNotification(s))
+        } catch (e: Exception) {
+            Log.w(TAG, "通知失败：${e.message}")
+        }
         /* 广播给主界面 */
         sendBroadcast(Intent(ACTION_STATUS).apply {
             setPackage(packageName)

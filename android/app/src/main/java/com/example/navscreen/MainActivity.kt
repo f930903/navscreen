@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var listView: ListView
 
     private var provider: NavProvider? = null
+    private var receiverRegistered = false
     private var pois: List<PoiHit> = emptyList()
     private var selLat = Double.NaN
     private var selLon = Double.NaN
@@ -49,12 +50,21 @@ class MainActivity : AppCompatActivity() {
         destEdit   = findViewById(R.id.et_dest)
         listView   = findViewById(R.id.lv_poi)
 
+        showCrashIfAny()
         requestPermissions()
 
-        provider = NavProviderFactory.create(this).apply {
-            onLog = { s -> runOnUiThread { statusText.text = s } }
+        provider = try {
+            NavProviderFactory.create(this).apply {
+                onLog = { s -> runOnUiThread { statusText.text = s } }
+            }
+        } catch (e: Throwable) {
+            CrashLog.save(this, "MainActivity 创建地图实现", e)
+            null
         }
-        statusText.text = "地图实现：${provider?.name}\n先点「开始推送」验证连接，再选目的地"
+        val bleOk = packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
+        statusText.text = "地图实现：${provider?.name}\n" +
+            "系统 API ${Build.VERSION.SDK_INT} · BLE ${if (bleOk) "支持" else "不支持"}\n" +
+            "先点「开始推送」验证连接，再选目的地"
 
         findViewById<Button>(R.id.btn_search).setOnClickListener {
             val kw = destEdit.text.toString().trim()
@@ -104,9 +114,14 @@ class MainActivity : AppCompatActivity() {
                     putExtra(NavService.EXTRA_DEST_NAME, selName)
                 }
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-            else startService(intent)
-            statusText.text = if (hasDest) "已启动：→ $selName" else "已启动：仅推送定位"
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+                else startService(intent)
+                statusText.text = if (hasDest) "已启动：→ $selName" else "已启动：仅推送定位"
+            } catch (e: Exception) {
+                CrashLog.save(this, "启动推送服务", e)
+                statusText.text = "启动失败：${e.javaClass.simpleName} ${e.message}"
+            }
         }
 
         findViewById<Button>(R.id.btn_stop).setOnClickListener {
@@ -117,11 +132,46 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        registerReceiver(statusReceiver, IntentFilter(NavService.ACTION_STATUS))
+        // Android 13（API 33）起必须显式声明导出标志，否则直接抛 SecurityException 闪退
+        try {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, statusReceiver, IntentFilter(NavService.ACTION_STATUS),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            receiverRegistered = true
+        } catch (e: Exception) {
+            receiverRegistered = false
+            CrashLog.save(this, "注册状态广播接收器", e)
+        }
+    }
+
+    /** 上次崩溃的堆栈直接显示在界面上，方便复制出来排查 */
+    private fun showCrashIfAny() {
+        val tv = findViewById<TextView>(R.id.tv_crash)
+        val btn = findViewById<Button>(R.id.btn_copy_crash)
+        val text = CrashLog.read(this) ?: return
+        tv.visibility = android.view.View.VISIBLE
+        tv.text = "上次崩溃：\n$text"
+        btn.visibility = android.view.View.VISIBLE
+        btn.setOnClickListener {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", text))
+            toast("已复制，粘贴发给开发者")
+        }
+        btn.setOnLongClickListener {
+            CrashLog.clear(this)
+            tv.visibility = android.view.View.GONE
+            btn.visibility = android.view.View.GONE
+            toast("已清除")
+            true
+        }
     }
 
     override fun onPause() {
-        try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
+        if (receiverRegistered) {
+            try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
+            receiverRegistered = false
+        }
         super.onPause()
     }
 
