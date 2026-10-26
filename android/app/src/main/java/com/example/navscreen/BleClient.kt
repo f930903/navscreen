@@ -7,7 +7,7 @@ import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
-import java.util.*
+import java.util.UUID
 import kotlin.coroutines.resume
 
 /**
@@ -88,7 +88,7 @@ class BleClient(
                         g.setCharacteristicNotification(stat, true)
                         stat.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
                             ?.let {
-                                it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                                it.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                                 g.writeDescriptor(it)
                             }
                     }
@@ -147,7 +147,7 @@ class BleClient(
         val c = dataChar ?: return
         val b = pending.removeFirstOrNull() ?: return
         writing = true
-        c.value = b
+        c.setValue(b)   // ⚠️ 必须 setValue()：Java setter 返回 boolean，Kotlin 不合成属性
         c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         if (gatt?.writeCharacteristic(c) != true) {
             writing = false
