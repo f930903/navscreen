@@ -29,9 +29,10 @@
 
   /* 顶部导航信息条：距离 / 用时 / 预计到达时刻 */
   #info {
-    position: absolute; z-index: 1000; top: 6px; left: 6px; right: 6px;
-    background: rgba(20,20,24,.82); color: #fff;
-    border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.4;
+    position: absolute; z-index: 1000; top: 8px; left: 8px; right: 8px;
+    background: rgba(22,24,29,.86); color: #fff;
+    border-radius: 14px; padding: 8px 12px; font-size: 12px; line-height: 1.45;
+    box-shadow: 0 2px 10px rgba(0,0,0,.25);
     pointer-events: none; display: none;
   }
   #info b { color: #FFB27A; }
@@ -85,7 +86,7 @@
     return curLayer;
   }
 
-  var meMarker = null, destMarker = null, routeLine = null, firstFix = true;
+  var meMarker = null, destMarker = null, routeLine = null, routeCasing = null, firstFix = true;
 
   function meIcon(bearing) {
     var html = '<div class="me-dot"><div class="me-arrow" style="transform:rotate(' +
@@ -119,10 +120,13 @@
   function onRoute(json, meters, seconds, name) {
     try {
       if (routeLine) map.removeLayer(routeLine);
-      routeLine = null;
+      if (routeCasing) map.removeLayer(routeCasing);
+      routeLine = null; routeCasing = null;
       var pts = JSON.parse(json);
       if (pts && pts.length >= 2) {
-        routeLine = L.polyline(pts, { color: '#1a73ff', weight: 6, opacity: 0.9 }).addTo(map);
+        /* 先画白色描边再画蓝线，路线在底图上更清晰（主流地图 App 的做法） */
+        routeCasing = L.polyline(pts, { color: '#ffffff', weight: 11, opacity: 0.9 }).addTo(map);
+        routeLine = L.polyline(pts, { color: '#1a73ff', weight: 6, opacity: 0.95 }).addTo(map);
         map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
         /* 终点补一个图钉（有些联想词选出来没单独打过） */
         var end = pts[pts.length - 1];
@@ -149,6 +153,7 @@
 
   function onClearRoute() {
     if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    if (routeCasing) { map.removeLayer(routeCasing); routeCasing = null; }
     if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
     document.getElementById('info').style.display = 'none';
   }

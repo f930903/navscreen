@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.NavScreen" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="colorPrimary">#FF7A1A</item>
-        <item name="colorPrimaryDark">#E06A10</item>
-        <item name="colorAccent">#FF7A1A</item>
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorPrimaryDark">@color/brandDark</item>
+        <item name="colorAccent">@color/brand</item>
+
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface</item>
         <item name="android:windowLightStatusBar">true</item>
+
+        <!-- 输入框光标 / 选中色统一品牌色 -->
+        <item name="colorControlNormal">@color/muted</item>
+        <item name="colorControlActivated">@color/brand</item>
+        <item name="colorControlHighlight">#33FF7A1A</item>
     </style>
 </resources>

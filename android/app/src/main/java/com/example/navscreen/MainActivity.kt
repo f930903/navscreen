@@ -40,6 +40,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var historyRow: View
     private lateinit var historyBox: LinearLayout
     private lateinit var mapView: WebView
+    private lateinit var adapter: PoiAdapter
+
+    /* 行程信息卡 */
+    private lateinit var tripCard: View
+    private lateinit var tripTime: TextView
+    private lateinit var tripDist: TextView
+    private lateinit var tripDest: TextView
 
     private var provider: NavProvider? = null
     private var receiverRegistered = false
@@ -77,12 +84,7 @@ class MainActivity : AppCompatActivity() {
                     val s = i.getDoubleExtra(NavService.EXTRA_SECONDS, 0.0)
                     val nm = (i.getStringExtra(NavService.EXTRA_DEST) ?: "").replace("'", "")
                     js("onRoute('$pts',$m,$s,'$nm')")
-                    if (m > 0) {
-                        val arrive = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
-                            .format(java.util.Date(System.currentTimeMillis() + s.toLong() * 1000))
-                        statusText.text = "全程 %.1f km · 约 %d 分钟 · 预计 %s 到达"
-                            .format(m / 1000.0, (s / 60).toInt().coerceAtLeast(1), arrive)
-                    }
+                    setTrip(m, s, nm)
                 }
             }
         }
@@ -109,7 +111,14 @@ class MainActivity : AppCompatActivity() {
         listView   = findViewById(R.id.lv_poi)
         historyRow = findViewById(R.id.row_history)
         historyBox = findViewById(R.id.ll_history)
+        tripCard   = findViewById(R.id.card_trip)
+        tripTime   = findViewById(R.id.tv_trip_time)
+        tripDist   = findViewById(R.id.tv_trip_dist)
+        tripDest   = findViewById(R.id.tv_trip_dest)
         prefs      = getSharedPreferences("navscreen", MODE_PRIVATE)
+
+        adapter = PoiAdapter(this)
+        listView.adapter = adapter
 
         showCrashIfAny()
         requestPermissions()
@@ -130,15 +139,20 @@ class MainActivity : AppCompatActivity() {
         setupMap()
         renderHistory()
 
-        findViewById<Button>(R.id.btn_myloc).setOnClickListener { js("recenterMe()") }
+        /* 右上角齿轮：展开/收起 Key 设置卡 */
+        val keyCard = findViewById<View>(R.id.card_key)
+        findViewById<ImageButton>(R.id.btn_settings).setOnClickListener {
+            keyCard.visibility = if (keyCard.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+
+        findViewById<ImageButton>(R.id.btn_myloc).setOnClickListener { js("recenterMe()") }
 
         /* 图层切换：标准图 / 卫星图 */
-        val layerBtn = findViewById<Button>(R.id.btn_layer)
         var satMode = false
-        layerBtn.setOnClickListener {
+        findViewById<ImageButton>(R.id.btn_layer).setOnClickListener {
             satMode = !satMode
             js(if (satMode) "setLayer('satellite')" else "setLayer('normal')")
-            layerBtn.text = if (satMode) "标准图" else "卫星图"
+            toast(if (satMode) "已切到卫星图" else "已切回标准图")
         }
 
         /* 输入联想：停笔 0.4 秒就去问高德，别每敲一个字都打一次 */
@@ -168,36 +182,28 @@ class MainActivity : AppCompatActivity() {
             doSearch(destEdit.text.toString())
         }
 
-        findViewById<Button>(R.id.btn_history_clear).setOnClickListener {
+        findViewById<View>(R.id.btn_history_clear).setOnClickListener {
             prefs.edit().remove("history").apply()
             renderHistory()
             toast("历史已清空")
         }
 
         listView.setOnItemClickListener { _, _, pos, _ ->
-            if (tipsMode) {
-                val t = tips.getOrNull(pos) ?: return@setOnItemClickListener
-                destEdit.setText(t.name)
-                destEdit.setSelection(t.name.length)
-                tipsMode = false
-                if (!t.lat.isNaN() && !t.lon.isNaN()) {
-                    selLat = t.lat; selLon = t.lon; selName = t.name
-                    saveHistory(t.name)
-                    statusText.text = "已选目的地：${t.name}（${t.district}${t.address}）"
-                    js("onDestination($selLat,$selLon,'${t.name.replace("'", "")}')")
-                    previewRoute()
-                } else {
-                    doSearch(t.name)   // 联想词没坐标 → 转正式搜索
-                }
-            } else {
-                val p = pois.getOrNull(pos) ?: return@setOnItemClickListener
-                selLat = p.lat
-                selLon = p.lon
-                selName = p.title
-                statusText.text = "已选目的地：${p.title}（${p.snippet}）"
-                js("onDestination(${p.lat},${p.lon},'${p.title.replace("'", "")}')")
-                previewRoute()
+            val r = adapter.getItem(pos)          // 行里带了名称 / 坐标
+            destEdit.setText(r.title)
+            destEdit.setSelection(r.title.length)
+            if (r.lat.isNaN() || r.lon.isNaN()) {  // 联想词没坐标 → 转正式搜索
+                doSearch(r.title)
+                return@setOnItemClickListener
             }
+            selLat = r.lat
+            selLon = r.lon
+            selName = r.title
+            tipsMode = false
+            saveHistory(r.title)
+            statusText.text = "已选目的地：${r.title}"
+            js("onDestination(${r.lat},${r.lon},'${r.title.replace("'", "")}')")
+            previewRoute()
         }
 
         findViewById<Button>(R.id.btn_start).setOnClickListener {
@@ -223,7 +229,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_stop).setOnClickListener {
             stopService(Intent(this, NavService::class.java))
             js("onClearRoute()")
-            statusText.text = "已停止"
+            tripCard.visibility = View.GONE
+            statusText.text = "已停止推送"
         }
     }
 
@@ -238,9 +245,7 @@ class MainActivity : AppCompatActivity() {
             selLat = la; selLon = lo; selName = "自定义坐标"
             tipsMode = false
             pois = listOf(PoiHit("自定义坐标", "%.5f, %.5f".format(la, lo), la, lo))
-            listView.adapter = ArrayAdapter(
-                this, android.R.layout.simple_list_item_2, android.R.id.text1,
-                pois.map { "${it.title}  ·  ${it.snippet}" })
+            adapter.submit(listOf(PoiRow("自定义坐标", "%.5f, %.5f".format(la, lo), "", la, lo)))
             statusText.text = "已选目的地：自定义坐标"
             js("onDestination($la,$lo,'自定义坐标')")
             previewRoute()
@@ -254,12 +259,10 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 tipsMode = false
                 pois = list
-                listView.adapter = ArrayAdapter(
-                    this,
-                    android.R.layout.simple_list_item_2,
-                    android.R.id.text1,
-                    list.map { "${it.title}  ·  ${it.snippet}" }
-                )
+                adapter.submit(list.map {
+                    val dist = it.snippet.substringAfterLast("距你 ", "").trim()
+                    PoiRow(it.title, it.snippet.substringBefore(" · 距你"), dist, it.lat, it.lon)
+                })
                 statusText.text = if (list.isNotEmpty()) "点一条作为目的地"
                     else if (statusText.text.toString() == "搜索中…") "没搜到，可改填「纬度,经度」"
                     else statusText.text   // 保留 provider 的提示（城市建议/错误码）
@@ -279,12 +282,9 @@ class MainActivity : AppCompatActivity() {
                     if (list.isEmpty()) return@runOnUiThread
                     tipsMode = true
                     tips = list
-                    listView.adapter = ArrayAdapter(
-                        this,
-                        android.R.layout.simple_list_item_2,
-                        android.R.id.text1,
-                        list.map { "${it.name}  ·  ${it.district}${it.address}" }
-                    )
+                    adapter.submit(list.map {
+                        PoiRow(it.name, "${it.district}${it.address}", "", it.lat, it.lon)
+                    })
                 }
             } catch (_: Exception) {
             }
@@ -304,13 +304,25 @@ class MainActivity : AppCompatActivity() {
                 sb.append('[').append(p.first).append(',').append(p.second).append(']')
             }
             sb.append(']')
-            js("onRoute('$sb',${plan.totalMeters},${plan.totalSeconds},'${selName.replace("'", "")}')")
-            val arrive = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
-                .format(java.util.Date(System.currentTimeMillis() + plan.totalSeconds.toLong() * 1000))
-            statusText.text = "全程 %.1f km · 约 %d 分钟 · 预计 %s 到达"
-                .format(plan.totalMeters / 1000.0,
-                    (plan.totalSeconds / 60).toInt().coerceAtLeast(1), arrive)
+                    js("onRoute('$sb',${plan.totalMeters},${plan.totalSeconds},'${selName.replace("'", "")}')")
+            setTrip(plan.totalMeters, plan.totalSeconds, selName)
         }
+    }
+
+    /** 更新行程信息卡：大号用时 + 距离 + 预计到达时刻 */
+    private fun setTrip(meters: Double, seconds: Double, name: String) {
+        if (meters <= 0) {
+            tripCard.visibility = View.GONE
+            return
+        }
+        tripCard.visibility = View.VISIBLE
+        val arrive = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
+            .format(java.util.Date(System.currentTimeMillis() + seconds.toLong() * 1000))
+        tripTime.text = "%d 分钟".format((seconds / 60).toInt().coerceAtLeast(1))
+        tripDist.text = "%.1f km\n预计 %s 到达".format(meters / 1000.0, arrive)
+        tripDest.text = "→ ${selName.ifBlank { name }}"
+        statusText.text = "全程 %.1f km · 约 %d 分钟 · 预计 %s 到达"
+            .format(meters / 1000.0, (seconds / 60).toInt().coerceAtLeast(1), arrive)
     }
 
     /* ---------------- 地图 ---------------- */
@@ -402,23 +414,27 @@ class MainActivity : AppCompatActivity() {
         historyBox.removeAllViews()
         historyRow.visibility = if (hs.isEmpty()) View.GONE else View.VISIBLE
         for (h in hs.take(8)) {
-            historyBox.addView(chip(h) {
+            val v = chip(h) {
                 destEdit.setText(h)
                 destEdit.setSelection(h.length)
                 doSearch(h)
-            })
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = 8 }
+            historyBox.addView(v, lp)
         }
     }
 
-    private fun chip(text: String, onClick: () -> Unit): Button =
-        Button(this).apply {
+    /** 历史记录胶囊 */
+    private fun chip(text: String, onClick: () -> Unit): TextView =
+        TextView(this).apply {
             this.text = text
             textSize = 12f
-            minWidth = 0
-            minimumWidth = 0
-            minHeight = 0
-            minimumHeight = 0
-            setPadding(28, 8, 28, 8)
+            setTextColor(resources.getColor(R.color.ink2, theme))
+            background = resources.getDrawable(R.drawable.bg_chip, theme)
+            setPadding(26, 14, 26, 14)
             setOnClickListener { onClick() }
         }
 

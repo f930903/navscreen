@@ -1,6 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 兼容旧引用 -->
     <color name="orange">#FF7A1A</color>
-    <color name="ink">#141418</color>
-    <color name="grey">#A49FAB</color>
+    <color name="ink">#16181D</color>
+    <color name="grey">#9AA0AA</color>
+
+    <!-- 品牌橙：导航屏主色 -->
+    <color name="brand">#FF7A1A</color>
+    <color name="brandDark">#E5670C</color>
+    <color name="brandSoft">#FFF1E6</color>
+
+    <!-- 中性色 -->
+    <color name="bg">#F4F5F7</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surfaceAlt">#F0F2F6</color>
+    <color name="ink2">#565C67</color>
+    <color name="muted">#9AA0AA</color>
+    <color name="line">#E7E9EE</color>
+
+    <!-- 语义色 -->
+    <color name="blue">#2F6BFF</color>
+    <color name="green">#18A058</color>
+    <color name="red">#E5484D</color>
 </resources>
