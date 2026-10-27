@@ -18,6 +18,9 @@ import android.util.Log
 
 /* ---------------- 数据模型 ---------------- */
 
+/** 出行方式：决定算路接口与策略（本项目默认摩托） */
+enum class RouteMode { MOTO, CAR, BIKE, WALK }
+
 /** 一次定位结果（坐标一律 GCJ-02，与圆屏底图一致） */
 data class NavFix(
     val lat: Double,
@@ -63,6 +66,11 @@ interface NavProvider {
     var onFix: ((NavFix) -> Unit)?
     var onRoute: ((RoutePlan?) -> Unit)?
     var onLog: ((String) -> Unit)?
+
+    /** 出行方式；不支持算路的实现忽略即可 */
+    var routeMode: RouteMode
+        get() = RouteMode.MOTO
+        set(_) {}
 
     fun start()
     fun stop()

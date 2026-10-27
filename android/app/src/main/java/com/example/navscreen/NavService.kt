@@ -70,6 +70,7 @@ class NavService : Service() {
         }
 
         provider = NavProviderFactory.create(applicationContext)
+        provider.routeMode = routeModeFromPrefs()   // 出行方式跟主界面保持一致（默认摩托）
         provider.onLog   = { log(it) }
         provider.onFix   = { fix -> onFix(fix) }
         provider.onRoute = { plan -> onRoute(plan) }
@@ -105,6 +106,13 @@ class NavService : Service() {
         log(if (hasDest) "导航推送已启动 → $destName" else "仅定位推送（未设目的地）")
         log("当前地图实现：${provider.name}")
         return START_STICKY
+    }
+
+    /** 读主界面里选的出行方式（默认摩托） */
+    private fun routeModeFromPrefs(): RouteMode {
+        val s = getSharedPreferences("navscreen", MODE_PRIVATE)
+            .getString("route_mode", RouteMode.MOTO.name) ?: RouteMode.MOTO.name
+        return try { RouteMode.valueOf(s) } catch (_: Exception) { RouteMode.MOTO }
     }
 
     /* ---------------- 定位回调 → 组帧推送 ---------------- */

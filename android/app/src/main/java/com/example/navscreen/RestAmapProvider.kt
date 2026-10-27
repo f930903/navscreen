@@ -39,6 +39,9 @@ class RestAmapProvider(
     override var onRoute: ((RoutePlan?) -> Unit)? = null
     override var onLog: ((String) -> Unit)? = null
 
+    /** 摩托：不走高速、避开收费（高德 Web 服务没有专门的摩托车接口，用驾车 + 策略 7 代替） */
+    override var routeMode: RouteMode = RouteMode.MOTO
+
     private val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private val main = Handler(Looper.getMainLooper())
     private var running = false
@@ -278,25 +281,41 @@ class RestAmapProvider(
         }
     }
 
-    /** 驾车算路：/v3/direction/driving（回调在调用方线程，需要主线程请自己 post） */
+    /** 按出行方式算路（回调在调用方线程，需要主线程请自己 post） */
     private fun computeRoute(
         oLat: Double, oLon: Double, destLat: Double, destLon: Double,
         cb: (RoutePlan?) -> Unit
     ) {
         Thread {
             try {
-                val url = "https://restapi.amap.com/v3/direction/driving?key=$key" +
-                    "&origin=$oLon,$oLat&destination=$destLon,$destLat" +
-                    "&strategy=0&output=json"
+                val mode = routeMode
+                val url = when (mode) {
+                    RouteMode.MOTO ->     // 策略 7：不走高速 + 避免收费，最接近摩托车可走的路
+                        "https://restapi.amap.com/v3/direction/driving?key=$key" +
+                            "&origin=$oLon,$oLat&destination=$destLon,$destLat" +
+                            "&strategy=7&output=json"
+                    RouteMode.CAR ->      // 策略 4：躲避拥堵 + 实时路况
+                        "https://restapi.amap.com/v3/direction/driving?key=$key" +
+                            "&origin=$oLon,$oLat&destination=$destLon,$destLat" +
+                            "&strategy=4&output=json"
+                    RouteMode.BIKE ->
+                        "https://restapi.amap.com/v4/direction/bicycling?key=$key" +
+                            "&origin=$oLon,$oLat&destination=$destLon,$destLat"
+                    RouteMode.WALK ->
+                        "https://restapi.amap.com/v3/direction/walking?key=$key" +
+                            "&origin=$oLon,$oLat&destination=$destLon,$destLat&output=json"
+                }
                 val obj = JSONObject(httpGet(url))
-                if (obj.optString("status") != "1") {
-                    val info = obj.optString("info")
-                    val code = obj.optString("infocode")
-                    onLog?.invoke("算路失败：$info ($code)")
+                /* 骑行接口（v4）把结果放在 data 里，其余在 route 里 */
+                val root = if (mode == RouteMode.BIKE) obj.optJSONObject("data")
+                else if (obj.optString("status") == "1") obj.optJSONObject("route")
+                else null
+                if (root == null) {
+                    onLog?.invoke("算路失败：${obj.optString("info")} (${obj.optString("infocode")})")
                     cb(null)
                     return@Thread
                 }
-                val paths = obj.getJSONObject("route").optJSONArray("paths")
+                val paths = root.optJSONArray("paths")
                 if (paths == null || paths.length() == 0) {
                     onLog?.invoke("高德没给出路线")
                     cb(null)
@@ -317,7 +336,7 @@ class RestAmapProvider(
                         steps.add(
                             RouteStep(
                                 action = s.optString("instruction"),
-                                road = s.optString("road"),
+                                road = s.optString("road").ifBlank { s.optString("road_name") },
                                 distance = s.optString("distance", "0").toDoubleOrNull() ?: 0.0,
                                 polyline = pts
                             )
@@ -328,6 +347,13 @@ class RestAmapProvider(
                     onLog?.invoke("路线没有折线点")
                     cb(null)
                     return@Thread
+                }
+                /* 摩托车：高德没专用接口，这里再兜一层检查，路线里若仍有禁行路段就提醒 */
+                if (mode == RouteMode.MOTO) {
+                    val bad = steps.firstOrNull { st ->
+                        st.road.contains("高速") || st.road.contains("快速路") || st.action.contains("高速")
+                    }
+                    if (bad != null) onLog?.invoke("⚠️ 路线含高速/快速路（${bad.road.ifBlank { bad.action }}），摩托禁行请以现场标志为准")
                 }
                 cb(RoutePlan(allPts, steps, totalM, totalS))
             } catch (e: Exception) {

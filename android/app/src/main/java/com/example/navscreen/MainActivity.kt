@@ -60,6 +60,9 @@ class MainActivity : AppCompatActivity() {
     private var selLon = Double.NaN
     private var selName = ""
 
+    /** 出行方式：默认摩托（跟圆屏的使用场景一致） */
+    private var routeMode: RouteMode = RouteMode.MOTO
+
     private val tipsHandler = Handler(Looper.getMainLooper())
     private var tipsRunnable: Runnable? = null
 
@@ -138,6 +141,7 @@ class MainActivity : AppCompatActivity() {
         initProvider()
         setupMap()
         renderHistory()
+        buildModeChips()
 
         /* 右上角齿轮：展开/收起 Key 设置卡 */
         val keyCard = findViewById<View>(R.id.card_key)
@@ -396,6 +400,55 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /* ---------------- 出行方式 ---------------- */
+
+    private fun buildModeChips() {
+        val box = findViewById<LinearLayout>(R.id.ll_modes)
+        box.removeAllViews()
+        val modes = listOf(
+            RouteMode.MOTO to "摩托车",
+            RouteMode.CAR  to "汽车",
+            RouteMode.BIKE to "骑行",
+            RouteMode.WALK to "步行"
+        )
+        for ((m, label) in modes) {
+            val v = chip(label) { setRouteMode(m) }
+            v.tag = m
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = 8 }
+            box.addView(v, lp)
+        }
+        paintModeChips(box)
+    }
+
+    private fun setRouteMode(m: RouteMode) {
+        routeMode = m
+        prefs.edit().putString("route_mode", m.name).apply()
+        provider?.routeMode = m
+        paintModeChips(findViewById(R.id.ll_modes))
+        val tip = when (m) {
+            RouteMode.MOTO -> "摩托车路线：不走高速、避开收费路段"
+            RouteMode.CAR  -> "汽车路线：躲避拥堵"
+            RouteMode.BIKE -> "骑行路线"
+            RouteMode.WALK -> "步行路线"
+        }
+        statusText.text = tip
+        if (!selLat.isNaN() && !selLon.isNaN()) previewRoute()   // 已选目的地就立刻按新方式重算
+    }
+
+    /** 选中项橙底白字，其余灰底 */
+    private fun paintModeChips(box: LinearLayout) {
+        for (i in 0 until box.childCount) {
+            val v = box.getChildAt(i) as? TextView ?: continue
+            val on = v.tag == routeMode
+            v.background = resources.getDrawable(
+                if (on) R.drawable.bg_chip_selected else R.drawable.bg_chip, theme)
+            v.setTextColor(resources.getColor(if (on) R.color.surface else R.color.ink2, theme))
+        }
+    }
+
     /* ---------------- 历史记录 ---------------- */
 
     private fun saveHistory(kw: String) {
@@ -441,8 +494,12 @@ class MainActivity : AppCompatActivity() {
     /* ---------------- 杂项（与之前一致） ---------------- */
 
     private fun initProvider() {
+        routeMode = try {
+            RouteMode.valueOf(prefs.getString("route_mode", RouteMode.MOTO.name) ?: RouteMode.MOTO.name)
+        } catch (_: Exception) { RouteMode.MOTO }
         provider = try {
             NavProviderFactory.create(this).apply {
+                routeMode = this@MainActivity.routeMode
                 onLog = { s -> runOnUiThread { statusText.text = s } }
             }
         } catch (e: Throwable) {

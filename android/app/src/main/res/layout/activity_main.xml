@@ -105,6 +105,31 @@
             android:textSize="13sp" />
     </LinearLayout>
 
+    <!-- 出行方式：默认摩托（不走高速、避开收费） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="14dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="出行方式"
+            android:textColor="@color/muted"
+            android:textSize="11sp" />
+
+        <LinearLayout
+            android:id="@+id/ll_modes"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:orientation="horizontal" />
+    </LinearLayout>
+
     <!-- 高德 Key（平时折叠在设置里，点右上角齿轮展开） -->
     <LinearLayout
         android:id="@+id/card_key"
@@ -363,7 +388,10 @@
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
             android:background="@drawable/bg_btn_outline"
+            android:elevation="0dp"
             android:minHeight="0dp"
+            android:outlineProvider="none"
+            android:stateListAnimator="@null"
             android:text="停止推送"
             android:textAllCaps="false"
             android:textColor="@color/ink2"
@@ -375,7 +403,10 @@
             android:layout_height="46dp"
             android:layout_weight="1"
             android:background="@drawable/bg_btn_primary"
+            android:elevation="0dp"
             android:minHeight="0dp"
+            android:outlineProvider="none"
+            android:stateListAnimator="@null"
             android:text="开始推送"
             android:textAllCaps="false"
             android:textColor="@color/surface"
