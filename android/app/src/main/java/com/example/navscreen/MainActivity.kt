@@ -185,6 +185,7 @@ class MainActivity : AppCompatActivity() {
                     saveHistory(t.name)
                     statusText.text = "已选目的地：${t.name}（${t.district}${t.address}）"
                     js("onDestination($selLat,$selLon,'${t.name.replace("'", "")}')")
+                    previewRoute()
                 } else {
                     doSearch(t.name)   // 联想词没坐标 → 转正式搜索
                 }
@@ -195,6 +196,7 @@ class MainActivity : AppCompatActivity() {
                 selName = p.title
                 statusText.text = "已选目的地：${p.title}（${p.snippet}）"
                 js("onDestination(${p.lat},${p.lon},'${p.title.replace("'", "")}')")
+                previewRoute()
             }
         }
 
@@ -240,6 +242,8 @@ class MainActivity : AppCompatActivity() {
                 this, android.R.layout.simple_list_item_2, android.R.id.text1,
                 pois.map { "${it.title}  ·  ${it.snippet}" })
             statusText.text = "已选目的地：自定义坐标"
+            js("onDestination($la,$lo,'自定义坐标')")
+            previewRoute()
             return
         }
 
@@ -285,6 +289,28 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
             }
         }.start()
+    }
+
+    /* ---------------- 路线预览 ---------------- */
+
+    /** 选中目的地后立刻算路：地图画蓝线 + 顶部信息条（全程/用时/预计到达），不用点开始推送 */
+    private fun previewRoute() {
+        if (selLat.isNaN() || selLon.isNaN()) return
+        provider?.previewRoute(selLat, selLon) { plan ->
+            if (plan == null) return@previewRoute
+            val sb = StringBuilder("[")
+            plan.points.forEachIndexed { i, p ->
+                if (i > 0) sb.append(',')
+                sb.append('[').append(p.first).append(',').append(p.second).append(']')
+            }
+            sb.append(']')
+            js("onRoute('$sb',${plan.totalMeters},${plan.totalSeconds},'${selName.replace("'", "")}')")
+            val arrive = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
+                .format(java.util.Date(System.currentTimeMillis() + plan.totalSeconds.toLong() * 1000))
+            statusText.text = "全程 %.1f km · 约 %d 分钟 · 预计 %s 到达"
+                .format(plan.totalMeters / 1000.0,
+                    (plan.totalSeconds / 60).toInt().coerceAtLeast(1), arrive)
+        }
     }
 
     /* ---------------- 地图 ---------------- */

@@ -257,29 +257,49 @@ class RestAmapProvider(
     /* ---------------- 驾车算路：/v3/direction/driving ---------------- */
 
     override fun routeTo(destLat: Double, destLon: Double) {
-        val fix = lastFix
-        if (fix == null) {
+        val origin = lastFix?.let { it.lat to it.lon } ?: cachedGcj()
+        if (origin == null) {
             onLog?.invoke("还没有定位，等 GPS 定位后自动算路")
             onRoute?.invoke(null)
             return
         }
+        computeRoute(origin.first, origin.second, destLat, destLon) { postRoute(it) }
+    }
+
+    /** 选中目的地后立刻预览：用缓存定位当起点，不起服务也能画线 */
+    override fun previewRoute(destLat: Double, destLon: Double, cb: (RoutePlan?) -> Unit) {
+        val origin = lastFix?.let { it.lat to it.lon } ?: cachedGcj()
+        if (origin == null) {
+            main.post { cb(null) }
+            return
+        }
+        computeRoute(origin.first, origin.second, destLat, destLon) { plan ->
+            main.post { cb(plan) }
+        }
+    }
+
+    /** 驾车算路：/v3/direction/driving（回调在调用方线程，需要主线程请自己 post） */
+    private fun computeRoute(
+        oLat: Double, oLon: Double, destLat: Double, destLon: Double,
+        cb: (RoutePlan?) -> Unit
+    ) {
         Thread {
             try {
                 val url = "https://restapi.amap.com/v3/direction/driving?key=$key" +
-                    "&origin=${fix.lon},${fix.lat}&destination=$destLon,$destLat" +
+                    "&origin=$oLon,$oLat&destination=$destLon,$destLat" +
                     "&strategy=0&output=json"
                 val obj = JSONObject(httpGet(url))
                 if (obj.optString("status") != "1") {
                     val info = obj.optString("info")
                     val code = obj.optString("infocode")
                     onLog?.invoke("算路失败：$info ($code)")
-                    postRoute(null)
+                    cb(null)
                     return@Thread
                 }
                 val paths = obj.getJSONObject("route").optJSONArray("paths")
                 if (paths == null || paths.length() == 0) {
                     onLog?.invoke("高德没给出路线")
-                    postRoute(null)
+                    cb(null)
                     return@Thread
                 }
                 val path = paths.getJSONObject(0)
@@ -306,13 +326,13 @@ class RestAmapProvider(
                 }
                 if (allPts.size < 2) {
                     onLog?.invoke("路线没有折线点")
-                    postRoute(null)
+                    cb(null)
                     return@Thread
                 }
-                postRoute(RoutePlan(allPts, steps, totalM, totalS))
+                cb(RoutePlan(allPts, steps, totalM, totalS))
             } catch (e: Exception) {
                 onLog?.invoke("算路异常：${e.message}")
-                postRoute(null)
+                cb(null)
             }
         }.start()
     }

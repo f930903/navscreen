@@ -70,6 +70,9 @@ interface NavProvider {
     /** 请求算路，结果通过 onRoute 回调；不支持时走 onLog 提示 */
     fun routeTo(destLat: Double, destLon: Double)
 
+    /** 选中目的地后的预览算路（不起服务也能画线）；默认不支持直接回调 null */
+    fun previewRoute(destLat: Double, destLon: Double, cb: (RoutePlan?) -> Unit) { cb(null) }
+
     /** 关键字搜目的地，结果通过回调返回；不支持时返回空列表 */
     fun searchPoi(keyword: String, city: String, cb: (List<PoiHit>) -> Unit)
 }
