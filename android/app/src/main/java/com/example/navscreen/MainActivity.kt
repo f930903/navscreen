@@ -37,7 +37,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var destEdit: EditText
     private lateinit var listView: ListView
     private lateinit var prefs: SharedPreferences
-    private lateinit var catsBox: LinearLayout
     private lateinit var historyRow: View
     private lateinit var historyBox: LinearLayout
     private lateinit var mapView: WebView
@@ -99,7 +98,6 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.tv_status)
         destEdit   = findViewById(R.id.et_dest)
         listView   = findViewById(R.id.lv_poi)
-        catsBox    = findViewById(R.id.ll_cats)
         historyRow = findViewById(R.id.row_history)
         historyBox = findViewById(R.id.ll_history)
         prefs      = getSharedPreferences("navscreen", MODE_PRIVATE)
@@ -121,8 +119,9 @@ class MainActivity : AppCompatActivity() {
 
         initProvider()
         setupMap()
-        buildCategoryChips()
         renderHistory()
+
+        findViewById<Button>(R.id.btn_myloc).setOnClickListener { js("recenterMe()") }
 
         /* 输入联想：停笔 0.4 秒就去问高德，别每敲一个字都打一次 */
         destEdit.addTextChangedListener(object : TextWatcher {
@@ -286,6 +285,13 @@ class MainActivity : AppCompatActivity() {
                 pushCachedLocation()
             }
         }
+        /* 地图页面里的诊断信息（如瓦片加载失败）直接显示到状态栏 */
+        mapView.addJavascriptInterface(object {
+            @android.webkit.JavascriptInterface
+            fun log(msg: String) {
+                runOnUiThread { statusText.text = "地图：$msg" }
+            }
+        }, "Android")
         mapView.loadUrl("file:///android_asset/map/index.html")
     }
 
@@ -334,18 +340,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /* ---------------- 分类入口 + 历史记录 ---------------- */
-
-    private fun buildCategoryChips() {
-        val cats = listOf("美食", "酒店", "景点", "加油站", "充电站", "超市", "停车场", "药店", "银行", "公厕")
-        for (c in cats) {
-            catsBox.addView(chip(c) {
-                destEdit.setText(c)
-                destEdit.setSelection(c.length)
-                doSearch(c)
-            })
-        }
-    }
+    /* ---------------- 历史记录 ---------------- */
 
     private fun saveHistory(kw: String) {
         val old = historyList().toMutableList()

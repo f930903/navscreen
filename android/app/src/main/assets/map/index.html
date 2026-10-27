@@ -36,14 +36,27 @@
   var map = L.map('map', { zoomControl: false, attributionControl: true })
              .setView([30.59, 114.31], 11);
 
-  L.tileLayer(
-    'https://webrst0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
+  var tileErrReported = false;
+  var tileLayer = L.tileLayer(
+    'https://webst0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
     { subdomains: ['1','2','3','4'], maxZoom: 18, minZoom: 3, attribution: '© 高德地图' }
-  ).addTo(map);
+  );
+  tileLayer.on('tileerror', function (e) {
+    if (tileErrReported) return;
+    tileErrReported = true;
+    try { Android.log('底图瓦片加载失败：' + (e && e.error ? e.error : '网络被拦')); } catch (x) {}
+  });
+  tileLayer.addTo(map);
 
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 
   var meMarker = null, destMarker = null, routeLine = null, firstFix = true;
+
+  /* 「我的位置」按钮：视野跳回蓝点 */
+  function recenterMe() {
+    if (meMarker) { map.setView(meMarker.getLatLng(), 16); }
+    else { try { Android.log('还没有定位，等几秒或检查定位权限'); } catch (x) {} }
+  }
 
   function meIcon(bearing) {
     var html = '<div class="me-dot"><div class="me-arrow" style="transform:rotate(' +
