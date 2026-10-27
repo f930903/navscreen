@@ -73,7 +73,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 NavService.ACTION_ROUTE -> {
                     val pts = i.getStringExtra(NavService.EXTRA_POINTS) ?: "[]"
-                    js("onRoute('${pts}')")
+                    val m = i.getDoubleExtra(NavService.EXTRA_METERS, 0.0)
+                    val s = i.getDoubleExtra(NavService.EXTRA_SECONDS, 0.0)
+                    val nm = (i.getStringExtra(NavService.EXTRA_DEST) ?: "").replace("'", "")
+                    js("onRoute('$pts',$m,$s,'$nm')")
+                    if (m > 0) {
+                        val arrive = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
+                            .format(java.util.Date(System.currentTimeMillis() + s.toLong() * 1000))
+                        statusText.text = "全程 %.1f km · 约 %d 分钟 · 预计 %s 到达"
+                            .format(m / 1000.0, (s / 60).toInt().coerceAtLeast(1), arrive)
+                    }
                 }
             }
         }
@@ -122,6 +131,15 @@ class MainActivity : AppCompatActivity() {
         renderHistory()
 
         findViewById<Button>(R.id.btn_myloc).setOnClickListener { js("recenterMe()") }
+
+        /* 图层切换：标准图 / 卫星图 */
+        val layerBtn = findViewById<Button>(R.id.btn_layer)
+        var satMode = false
+        layerBtn.setOnClickListener {
+            satMode = !satMode
+            js(if (satMode) "setLayer('satellite')" else "setLayer('normal')")
+            layerBtn.text = if (satMode) "标准图" else "卫星图"
+        }
 
         /* 输入联想：停笔 0.4 秒就去问高德，别每敲一个字都打一次 */
         destEdit.addTextChangedListener(object : TextWatcher {

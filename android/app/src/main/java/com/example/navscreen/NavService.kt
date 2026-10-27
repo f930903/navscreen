@@ -34,6 +34,9 @@ class NavService : Service() {
         const val EXTRA_SPEED      = "speed"
         const val ACTION_ROUTE     = "com.example.navscreen.ROUTE"   // 路线点 JSON（给主界面地图）
         const val EXTRA_POINTS     = "points"
+        const val EXTRA_METERS     = "meters"    // 全程米
+        const val EXTRA_SECONDS    = "seconds"   // 全程秒
+        const val EXTRA_DEST       = "dest"
 
         private const val TAG      = "NavService"
         private const val CH_ID    = "nav_push"
@@ -164,6 +167,9 @@ class NavService : Service() {
             sendBroadcast(Intent(ACTION_ROUTE).apply {
                 setPackage(packageName)
                 putExtra(EXTRA_POINTS, "[]")
+                putExtra(EXTRA_METERS, 0.0)
+                putExtra(EXTRA_SECONDS, 0.0)
+                putExtra(EXTRA_DEST, "")
             })
             return
         }
@@ -182,7 +188,18 @@ class NavService : Service() {
         sendBroadcast(Intent(ACTION_ROUTE).apply {
             setPackage(packageName)
             putExtra(EXTRA_POINTS, sb.toString())
+            putExtra(EXTRA_METERS, plan.totalMeters)
+            putExtra(EXTRA_SECONDS, plan.totalSeconds)
+            putExtra(EXTRA_DEST, destName)
         })
+        /* 状态栏同步一条：距离 + 用时 + 预计到达时刻 */
+        val arrive = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
+            .format(java.util.Date(System.currentTimeMillis() + plan.totalSeconds.toLong() * 1000))
+        notifyText("全程 %.1f km · 约 %d 分钟 · 预计 %s 到达".format(
+            plan.totalMeters / 1000.0,
+            (plan.totalSeconds / 60).toInt().coerceAtLeast(1),
+            arrive
+        ))
 
         scope.launch {
             ble.write(NavProtocol.text(0, destName))          // 目的地

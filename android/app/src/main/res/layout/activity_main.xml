@@ -108,6 +108,18 @@
             android:padding="10dp"
             android:text="◎ 我的位置"
             android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btn_layer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="8dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:padding="10dp"
+            android:text="卫星图"
+            android:textSize="12sp" />
     </FrameLayout>
 
     <ListView

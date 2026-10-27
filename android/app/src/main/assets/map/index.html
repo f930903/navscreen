@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 <link rel="stylesheet" href="leaflet.css"/>
 <style>
-  html, body, #map { height: 100%; margin: 0; padding: 0; background: #f2f2f2; }
-  /* 我的位置：蓝点（外圈白边），中心有个小箭头按航向旋转 */
+  html, body { margin: 0; padding: 0; height: 100%; background: #f2f2f2; }
+  #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+
+  /* 我的位置：蓝点 + 按航向旋转的箭头 */
   .me-dot {
     width: 18px; height: 18px; background: #1a73ff;
     border: 3px solid #fff; border-radius: 50%;
@@ -18,45 +20,72 @@
     border-right: 5px solid transparent;
     border-bottom: 10px solid #fff;
   }
-  /* 目的地：橙色图钉 */
   .dest-pin {
     width: 22px; height: 22px; background: #FF7A1A;
     border: 2px solid #fff; border-radius: 50% 50% 50% 0;
     transform: rotate(-45deg);
     box-shadow: 0 0 6px rgba(0,0,0,.45);
   }
+
+  /* 顶部导航信息条：距离 / 用时 / 预计到达时刻 */
+  #info {
+    position: absolute; z-index: 1000; top: 6px; left: 6px; right: 6px;
+    background: rgba(20,20,24,.82); color: #fff;
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.4;
+    pointer-events: none; display: none;
+  }
+  #info b { color: #FFB27A; }
 </style>
 </head>
 <body>
 <div id="map"></div>
+<div id="info"></div>
 <script src="leaflet.js"></script>
 <script>
-  /* 坐标系说明：App 推过来的坐标是 GCJ-02（已纠偏），
-     高德栅格瓦片也是 GCJ-02，两者天然对齐，不会再偏 300~500 米。 */
+  /* 坐标：App 推过来的是 GCJ-02（已纠偏），高德栅格瓦片也是 GCJ-02，天然对齐 */
   var map = L.map('map', { zoomControl: false, attributionControl: true })
              .setView([30.59, 114.31], 11);
 
-  var tileErrReported = false;
-  var tileLayer = L.tileLayer(
-    'https://webst0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
-    { subdomains: ['1','2','3','4'], maxZoom: 18, minZoom: 3, attribution: '© 高德地图' }
-  );
-  tileLayer.on('tileerror', function (e) {
-    if (tileErrReported) return;
-    tileErrReported = true;
-    try { Android.log('底图瓦片加载失败：' + (e && e.error ? e.error : '网络被拦')); } catch (x) {}
-  });
-  tileLayer.addTo(map);
+  function amapTiles(style) {
+    return L.tileLayer(
+      'https://webst0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=' + style + '&x={x}&y={y}&z={z}',
+      { subdomains: ['1','2','3','4'], maxNativeZoom: 18, maxZoom: 19, minZoom: 3, attribution: '© 高德地图' }
+    );
+  }
 
+  var normalLayer = amapTiles(7);      // 标准矢量路网
+  var satLayer    = amapTiles(6);      // 卫星影像
+  var roadLayer   = amapTiles(8);      // 路网叠加（配合卫星图看地名道路）
+  var curLayer = 'normal';
+  var tileErrReported = false;
+
+  function watchErr(layer) {
+    layer.on('tileerror', function (e) {
+      if (tileErrReported) return;
+      tileErrReported = true;
+      try { Android.log('底图瓦片加载失败：' + (e && e.error ? e.error : '网络被拦')); } catch (x) {}
+    });
+  }
+  watchErr(normalLayer); watchErr(satLayer); watchErr(roadLayer);
+
+  normalLayer.addTo(map);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-  var meMarker = null, destMarker = null, routeLine = null, firstFix = true;
-
-  /* 「我的位置」按钮：视野跳回蓝点 */
-  function recenterMe() {
-    if (meMarker) { map.setView(meMarker.getLatLng(), 16); }
-    else { try { Android.log('还没有定位，等几秒或检查定位权限'); } catch (x) {} }
+  /* 图层切换：normal / satellite */
+  function setLayer(mode) {
+    map.removeLayer(normalLayer);
+    map.removeLayer(satLayer);
+    map.removeLayer(roadLayer);
+    if (mode === 'satellite') { satLayer.addTo(map); roadLayer.addTo(map); }
+    else { normalLayer.addTo(map); }
+    curLayer = mode;
   }
+  function toggleLayer() {
+    setLayer(curLayer === 'normal' ? 'satellite' : 'normal');
+    return curLayer;
+  }
+
+  var meMarker = null, destMarker = null, routeLine = null, firstFix = true;
 
   function meIcon(bearing) {
     var html = '<div class="me-dot"><div class="me-arrow" style="transform:rotate(' +
@@ -64,7 +93,6 @@
     return L.divIcon({ className: '', html: html, iconSize: [18, 18], iconAnchor: [9, 9] });
   }
 
-  /* 我的位置（GCJ-02） */
   function onMyLocation(lat, lng, bearing, speed) {
     var p = [lat, lng];
     if (!meMarker) {
@@ -73,10 +101,9 @@
       meMarker.setLatLng(p);
       meMarker.setIcon(meIcon(bearing));
     }
-    if (firstFix) { map.setView(p, 16); firstFix = false; }
+    if (firstFix) { map.setView(p, 17); firstFix = false; }   // 首次定位直接给到街道级
   }
 
-  /* 目的地图钉；有我的位置就把两点都框进视野 */
   function onDestination(lat, lng, name) {
     var p = [lat, lng];
     if (destMarker) map.removeLayer(destMarker);
@@ -85,25 +112,50 @@
     }).addTo(map);
     if (name) destMarker.bindTooltip(name, { direction: 'top', offset: [0, -20] });
     if (meMarker) map.fitBounds([meMarker.getLatLng(), p], { padding: [40, 40] });
-    else map.setView(p, 15);
+    else map.setView(p, 16);
   }
 
-  /* 路线蓝线：json 是 [[lat,lng],...] */
-  function onRoute(json) {
+  /* 路线 + 导航信息：json=[[lat,lng]...]，meters 全程米，seconds 全程秒 */
+  function onRoute(json, meters, seconds, name) {
     try {
-      var pts = JSON.parse(json);
       if (routeLine) map.removeLayer(routeLine);
       routeLine = null;
+      var pts = JSON.parse(json);
       if (pts && pts.length >= 2) {
-        routeLine = L.polyline(pts, { color: '#1a73ff', weight: 6, opacity: 0.85 }).addTo(map);
+        routeLine = L.polyline(pts, { color: '#1a73ff', weight: 6, opacity: 0.9 }).addTo(map);
         map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+        /* 终点补一个图钉（有些联想词选出来没单独打过） */
+        var end = pts[pts.length - 1];
+        if (!destMarker) onDestination(end[0], end[1], name || '目的地');
       }
+      showInfo(meters, seconds, name);
     } catch (e) {}
+  }
+
+  function showInfo(meters, seconds, name) {
+    var box = document.getElementById('info');
+    if (!meters || meters <= 0) { box.style.display = 'none'; return; }
+    var km = meters / 1000.0;
+    var min = Math.max(1, Math.round((seconds || 0) / 60.0));
+    var arrive = new Date(Date.now() + (seconds || 0) * 1000);
+    var hh = ('0' + arrive.getHours()).slice(-2);
+    var mm = ('0' + arrive.getMinutes()).slice(-2);
+    box.innerHTML = (name ? '→ <b>' + name + '</b><br/>' : '') +
+      '全程 <b>' + km.toFixed(1) + ' km</b> · ' +
+      '约 <b>' + min + ' 分钟</b> · ' +
+      '预计 <b>' + hh + ':' + mm + '</b> 到达';
+    box.style.display = 'block';
   }
 
   function onClearRoute() {
     if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
     if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    document.getElementById('info').style.display = 'none';
+  }
+
+  function recenterMe() {
+    if (meMarker) map.setView(meMarker.getLatLng(), 17);
+    else { try { Android.log('还没有定位，等几秒或检查定位权限'); } catch (x) {} }
   }
 </script>
 </body>
