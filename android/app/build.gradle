@@ -12,8 +12,9 @@ android {
         applicationId "com.example.navscreen"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        /* 版本号用 GitHub Actions 的 run 号，保证每次出包都比上一版大（App 自动更新靠它比对） */
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+        versionName = "1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
     }
 
     buildFeatures {

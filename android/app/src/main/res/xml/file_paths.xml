@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider：让系统安装器能读到我们下载好的 APK -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="apk" path="." />
+    <external-cache-path name="ext_apk" path="." />
+</paths>

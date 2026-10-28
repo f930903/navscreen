@@ -1,0 +1,84 @@
+name: 推送公告
+
+# 这就是「推送后台」：在 GitHub 上点一下 Run workflow，填标题和内容，
+# 提交后所有人的 App 6 小时内会收到通知栏推送 + 应用内公告卡。
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: 公告标题（必填）
+        required: true
+      body:
+        description: 公告正文
+        required: false
+        default: ''
+      url:
+        description: 点通知后要打开的链接（可留空）
+        required: false
+        default: ''
+      clear:
+        description: 是否撤下当前公告（true = 清空）
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: announce
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 写入公告
+        env:
+          TITLE: ${{ github.event.inputs.title }}
+          BODY: ${{ github.event.inputs.body }}
+          URL: ${{ github.event.inputs.url }}
+          CLEAR: ${{ github.event.inputs.clear }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          import json, os, time
+          path = 'updates/announce.json'
+          d = json.load(open(path, encoding='utf-8'))
+
+          if os.environ.get('CLEAR') == 'true':
+              d['news'] = {}
+          else:
+              # id 变一下，App 才会当成新消息推送（同一 id 只推一次）
+              d['news'] = {
+                  'id': time.strftime('%Y%m%d-%H%M%S'),
+                  'title': os.environ['TITLE'],
+                  'body': os.environ.get('BODY', ''),
+                  'url': os.environ.get('URL', ''),
+                  'time': time.strftime('%Y-%m-%d'),
+              }
+
+          open(path, 'w', encoding='utf-8').write(
+              json.dumps(d, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(d, ensure_ascii=False, indent=2))
+          PY
+
+      - name: 提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          git add updates/announce.json
+          if git diff --cached --quiet; then
+            echo "无变化，跳过提交"
+          else
+            git commit -m "announce: ${{ github.event.inputs.title }} [skip ci]"
+            git push origin main
+          fi
+        env:
+          TITLE: ${{ github.event.inputs.title }}
+          BODY: ${{ github.event.inputs.body }}
+          URL: ${{ github.event.inputs.url }}
+          CLEAR: ${{ github.event.inputs.clear }}

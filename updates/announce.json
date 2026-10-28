@@ -1,0 +1,14 @@
+{
+  "versionCode": 1,
+  "versionName": "1.0",
+  "apkUrl": "https://raw.githubusercontent.com/f930903/navscreen/apk/download/navscreen-lite-debug.apk",
+  "notes": "",
+  "force": false,
+  "news": {
+    "id": "20261028-001",
+    "title": "摩托路线上线",
+    "body": "默认按摩托车算路（不走高速、避开收费），另有汽车/骑行/步行可选。输入联想候选现在会直接浮在搜索框下面。",
+    "url": "",
+    "time": "2026-10-28"
+  }
+}

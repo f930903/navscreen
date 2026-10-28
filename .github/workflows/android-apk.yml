@@ -112,3 +112,30 @@ jobs:
           git commit -m "apk: 自动发布 lite APK · run ${GITHUB_RUN_NUMBER} [skip ci]" || exit 0
           git push -f origin apk
           echo "已发布：https://raw.githubusercontent.com/f930903/navscreen/apk/download/navscreen-lite-debug.apk"
+
+      # 编译成功 = 有新版本，把版本号写进 announce.json，所有人的 App 都会收到更新提示
+      - name: 更新版本信息（供 App 自动更新用）
+        if: success()
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          python3 - <<'PY'
+          import json, os
+          path = 'updates/announce.json'
+          d = json.load(open(path, encoding='utf-8'))
+          run = int(os.environ['GITHUB_RUN_NUMBER'])
+          d['versionCode'] = run
+          d['versionName'] = '1.%d' % run
+          d['apkUrl'] = 'https://raw.githubusercontent.com/f930903/navscreen/apk/download/navscreen-lite-debug.apk'
+          d['notes'] = os.environ.get('NOTES', '')
+          open(path, 'w', encoding='utf-8').write(
+              json.dumps(d, ensure_ascii=False, indent=2) + '\n')
+          print('announce.json ->', d['versionCode'], d['versionName'])
+          PY
+          git add updates/announce.json
+          git commit -m "chore: 版本号更新到 run ${GITHUB_RUN_NUMBER} [skip ci]" || exit 0
+          git push origin main
+        env:
+          NOTES: ${{ github.event.head_commit.message }}

@@ -50,6 +50,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tripDist: TextView
     private lateinit var tripDest: TextView
 
+    /* 后台推送过来的公告 */
+    private lateinit var newsCard: View
+    private lateinit var newsTitle: TextView
+    private lateinit var newsBody: TextView
+    private lateinit var newsTime: TextView
+
     private var provider: NavProvider? = null
     private var receiverRegistered = false
 
@@ -128,6 +134,10 @@ class MainActivity : AppCompatActivity() {
         tripTime   = findViewById(R.id.tv_trip_time)
         tripDist   = findViewById(R.id.tv_trip_dist)
         tripDest   = findViewById(R.id.tv_trip_dest)
+        newsCard   = findViewById(R.id.card_news)
+        newsTitle  = findViewById(R.id.tv_news_title)
+        newsBody   = findViewById(R.id.tv_news_body)
+        newsTime   = findViewById(R.id.tv_news_time)
         prefs      = getSharedPreferences("navscreen", MODE_PRIVATE)
 
         adapter = PoiAdapter(this)
@@ -154,6 +164,7 @@ class MainActivity : AppCompatActivity() {
         setupMap()
         renderHistory()
         buildModeChips()
+        setupUpdates()
 
         /* 右上角齿轮：展开/收起 Key 设置卡 */
         val keyCard = findViewById<View>(R.id.card_key)
@@ -328,6 +339,51 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
             }
         }.start()
+    }
+
+    /* ---------------- 版本更新 / 后台公告 ---------------- */
+
+    private fun setupUpdates() {
+        UpdateManager.schedule(this)          // 每 6 小时后台轮询一次
+        findViewById<Button>(R.id.btn_check).setOnClickListener { doCheckUpdate(true) }
+        doCheckUpdate(false)
+    }
+
+    private fun doCheckUpdate(manual: Boolean) {
+        UpdateManager.check(this, false) { info, news ->
+            news?.let {
+                newsCard.visibility = View.VISIBLE
+                newsTitle.text = it.title
+                newsBody.text = it.body
+                newsTime.text = it.time
+                prefs.edit().putString("last_news_id", it.id).apply()
+            }
+            if (info != null && info.apkUrl.isNotBlank()) showUpdateDialog(info)
+            else if (manual) toast("已经是最新版本 v${BuildConfig.VERSION_NAME}")
+        }
+    }
+
+    private fun showUpdateDialog(info: UpdateInfo) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("有新版本 ${info.versionName}")
+            .setMessage(if (info.notes.isBlank()) "有新版本可用，建议更新" else info.notes)
+            .setPositiveButton("立即更新") { _, _ ->
+                val i = Intent(this, UpdateService::class.java).apply {
+                    action = UpdateService.ACTION_DOWNLOAD
+                    putExtra(UpdateService.EXTRA_URL, info.apkUrl)
+                }
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i)
+                    else startService(i)
+                    statusText.text = "正在后台下载新版本…"
+                } catch (e: Exception) {
+                    CrashLog.save(this, "启动更新下载", e)
+                    statusText.text = "下载启动失败：${e.message}"
+                }
+            }
+            .setNegativeButton("以后再说") { _, _ -> UpdateManager.skipVersion(this, info.versionCode) }
+            .setCancelable(!info.force)
+            .show()
     }
 
     /* ---------------- 路线预览 ---------------- */
