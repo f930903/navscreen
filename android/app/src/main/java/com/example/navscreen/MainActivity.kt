@@ -36,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var destEdit: EditText
     private lateinit var listView: ListView
+    private lateinit var tipsView: ListView
+    private lateinit var tipsAdapter: PoiAdapter
     private lateinit var prefs: SharedPreferences
     private lateinit var historyRow: View
     private lateinit var historyBox: LinearLayout
@@ -52,8 +54,15 @@ class MainActivity : AppCompatActivity() {
     private var receiverRegistered = false
 
     /* 列表当前显示的是 POI 结果还是输入联想 */
-    private var tipsMode = false
     private var tips: List<AmapWeb.Tip> = emptyList()
+
+    /** 程序代填文字时不触发联想（选完候选别再弹一遍） */
+    private var suppressTipsOnce = false
+    private fun setDestText(s: String) {
+        suppressTipsOnce = true
+        destEdit.setText(s)
+        destEdit.setSelection(s.length)
+    }
     private var pois: List<PoiHit> = emptyList()
 
     private var selLat = Double.NaN
@@ -112,6 +121,7 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.tv_status)
         destEdit   = findViewById(R.id.et_dest)
         listView   = findViewById(R.id.lv_poi)
+        tipsView   = findViewById(R.id.lv_tips)
         historyRow = findViewById(R.id.row_history)
         historyBox = findViewById(R.id.ll_history)
         tripCard   = findViewById(R.id.card_trip)
@@ -122,6 +132,8 @@ class MainActivity : AppCompatActivity() {
 
         adapter = PoiAdapter(this)
         listView.adapter = adapter
+        tipsAdapter = PoiAdapter(this)
+        tipsView.adapter = tipsAdapter
 
         showCrashIfAny()
         requestPermissions()
@@ -159,15 +171,24 @@ class MainActivity : AppCompatActivity() {
             toast(if (satMode) "已切到卫星图" else "已切回标准图")
         }
 
-        /* 输入联想：停笔 0.4 秒就去问高德，别每敲一个字都打一次 */
+        /* 输入联想：停笔 0.4 秒就去问高德，候选直接浮在搜索框下面 */
         destEdit.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) {
+                if (suppressTipsOnce) {
+                    suppressTipsOnce = false
+                    tipsView.visibility = View.GONE
+                    return
+                }
                 val kw = s?.toString()?.trim().orEmpty()
                 tipsRunnable?.let { tipsHandler.removeCallbacks(it) }
-                if (kw.length < 2 || parseLatLon(kw) != null) return
-                if (prefs.getString("amap_web_key", "").isNullOrBlank()) return
+                if (kw.length < 2 || parseLatLon(kw) != null ||
+                    prefs.getString("amap_web_key", "").isNullOrBlank()
+                ) {
+                    tipsView.visibility = View.GONE
+                    return
+                }
                 val r = Runnable { fetchTips(kw) }
                 tipsRunnable = r
                 tipsHandler.postDelayed(r, 400)
@@ -192,18 +213,31 @@ class MainActivity : AppCompatActivity() {
             toast("历史已清空")
         }
 
+        /* 主列表（搜索结果）点击 */
         listView.setOnItemClickListener { _, _, pos, _ ->
             val r = adapter.getItem(pos)          // 行里带了名称 / 坐标
-            destEdit.setText(r.title)
-            destEdit.setSelection(r.title.length)
-            if (r.lat.isNaN() || r.lon.isNaN()) {  // 联想词没坐标 → 转正式搜索
+            setDestText(r.title)
+            selLat = r.lat
+            selLon = r.lon
+            selName = r.title
+            saveHistory(r.title)
+            statusText.text = "已选目的地：${r.title}"
+            js("onDestination(${r.lat},${r.lon},'${r.title.replace("'", "")}')")
+            previewRoute()
+        }
+
+        /* 输入联想下拉点击：没坐标的联想词转正式搜索，有坐标的直接选为目的地 */
+        tipsView.setOnItemClickListener { _, _, pos, _ ->
+            val r = tipsAdapter.getItem(pos)
+            tipsView.visibility = View.GONE
+            setDestText(r.title)
+            if (r.lat.isNaN() || r.lon.isNaN()) {
                 doSearch(r.title)
                 return@setOnItemClickListener
             }
             selLat = r.lat
             selLon = r.lon
             selName = r.title
-            tipsMode = false
             saveHistory(r.title)
             statusText.text = "已选目的地：${r.title}"
             js("onDestination(${r.lat},${r.lon},'${r.title.replace("'", "")}')")
@@ -243,11 +277,11 @@ class MainActivity : AppCompatActivity() {
     private fun doSearch(kw0: String) {
         val kw = kw0.trim()
         if (kw.isEmpty()) { toast("先输入目的地"); return }
+        tipsView.visibility = View.GONE   // 搜了就收起联想下拉
 
         /* 支持直接填坐标：39.9,116.4 */
         parseLatLon(kw)?.let { (la, lo) ->
             selLat = la; selLon = lo; selName = "自定义坐标"
-            tipsMode = false
             pois = listOf(PoiHit("自定义坐标", "%.5f, %.5f".format(la, lo), la, lo))
             adapter.submit(listOf(PoiRow("自定义坐标", "%.5f, %.5f".format(la, lo), "", la, lo)))
             statusText.text = "已选目的地：自定义坐标"
@@ -256,12 +290,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        tipsMode = false
         saveHistory(kw)
         statusText.text = "搜索中…"
         provider?.searchPoi(kw, "") { list ->
             runOnUiThread {
-                tipsMode = false
                 pois = list
                 adapter.submit(list.map {
                     val dist = it.snippet.substringAfterLast("距你 ", "").trim()
@@ -283,12 +315,15 @@ class MainActivity : AppCompatActivity() {
                 val list = AmapWeb.inputTips(key, kw, city)
                 runOnUiThread {
                     if (destEdit.text.toString().trim() != kw) return@runOnUiThread  // 结果过期
-                    if (list.isEmpty()) return@runOnUiThread
-                    tipsMode = true
+                    if (list.isEmpty()) {
+                        tipsView.visibility = View.GONE
+                        return@runOnUiThread
+                    }
                     tips = list
-                    adapter.submit(list.map {
+                    tipsAdapter.submit(list.map {
                         PoiRow(it.name, "${it.district}${it.address}", "", it.lat, it.lon)
                     })
+                    tipsView.visibility = View.VISIBLE
                 }
             } catch (_: Exception) {
             }
@@ -468,8 +503,7 @@ class MainActivity : AppCompatActivity() {
         historyRow.visibility = if (hs.isEmpty()) View.GONE else View.VISIBLE
         for (h in hs.take(8)) {
             val v = chip(h) {
-                destEdit.setText(h)
-                destEdit.setSelection(h.length)
+                setDestText(h)
                 doSearch(h)
             }
             val lp = LinearLayout.LayoutParams(
