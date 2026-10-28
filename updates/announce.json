@@ -1,8 +1,8 @@
 {
-  "versionCode": 1,
-  "versionName": "1.0",
+  "versionCode": 22,
+  "versionName": "1.22",
   "apkUrl": "https://raw.githubusercontent.com/f930903/navscreen/apk/download/navscreen-lite-debug.apk",
-  "notes": "",
+  "notes": "fix(ci): 更新 announce.json 前先切回 main 分支",
   "force": false,
   "news": {
     "id": "20261028-001",
