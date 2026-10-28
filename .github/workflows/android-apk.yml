@@ -120,7 +120,8 @@ jobs:
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
+          # 上一步把 HEAD 留在 apk 分支了，这里必须先回到 main
+          git checkout -B main origin/main
           python3 - <<'PY'
           import json, os
           path = 'updates/announce.json'
